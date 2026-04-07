@@ -177,7 +177,10 @@ async fn test_health_returns_ok() {
     let result = health::handle(test_ctx(&url), None)
         .await
         .expect("health must not error");
-    let text = &result.content[0].as_text().expect("content must be text").text;
+    let text = &result.content[0]
+        .as_text()
+        .expect("content must be text")
+        .text;
     let v: Value = serde_json::from_str(text).expect("must be valid JSON");
     assert_eq!(v["status"], "ok");
     assert_eq!(v["pg_reachable"], true);
@@ -222,7 +225,13 @@ async fn test_health_response_has_all_fields() {
         .expect("health handle must succeed");
     let text = &result.content[0].as_text().unwrap().text;
     let v: Value = serde_json::from_str(text).unwrap();
-    for field in &["status", "pg_reachable", "pool_available", "latency_ms", "pool_stats"] {
+    for field in &[
+        "status",
+        "pg_reachable",
+        "pool_available",
+        "latency_ms",
+        "pool_stats",
+    ] {
         assert!(v.get(field).is_some(), "missing field: {field}");
     }
 }
@@ -241,7 +250,15 @@ async fn test_connection_info_has_all_fields() {
         .expect("connection_info must succeed");
     let text = &result.content[0].as_text().expect("text content").text;
     let v: Value = serde_json::from_str(text).unwrap();
-    for field in &["host", "port", "database", "role", "ssl", "server_version", "pool"] {
+    for field in &[
+        "host",
+        "port",
+        "database",
+        "role",
+        "ssl",
+        "server_version",
+        "pool",
+    ] {
         assert!(v.get(field).is_some(), "missing field: {field}");
     }
 }
