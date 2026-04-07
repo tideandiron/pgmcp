@@ -31,11 +31,13 @@ use rmcp::{
 
 use crate::{config::Config, pg::pool::Pool};
 
+use self::context::ToolContext;
+
 /// The pgmcp MCP server handler.
 ///
 /// Holds shared references to the connection pool and application config.
 /// Implements `rmcp::ServerHandler` to process MCP protocol requests.
-/// Clone-able so the SSE transport factory can create one per session.
+/// Clone is cheap — both fields are Arc-wrapped.
 #[derive(Clone)]
 pub struct PgMcpServer {
     pool: Arc<Pool>,
@@ -57,13 +59,13 @@ impl ServerHandler for PgMcpServer {
             .with_instructions(
                 "pgmcp is a PostgreSQL MCP server. Use the available tools to \
                  inspect the database schema, execute SQL queries, and analyze \
-                 query performance.",
+                 query performance. Start with server_info or health to verify \
+                 connectivity, then use list_schemas and list_tables to explore \
+                 the schema, and query to run SQL.",
             )
     }
 
-    /// Return the list of all available tools.
-    ///
-    /// In feat/006 this returns an empty list. feat/007 fills in all 15 tools.
+    /// Return the complete list of all 15 pgmcp tools.
     fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
@@ -72,24 +74,31 @@ impl ServerHandler for PgMcpServer {
     {
         std::future::ready(Ok(ListToolsResult {
             meta: None,
-            tools: vec![],
+            tools: tool_defs::tool_list(),
             next_cursor: None,
         }))
     }
 
-    /// Route a tool call request.
-    ///
-    /// In feat/006 all tool calls return an error result. feat/007 adds routing.
+    /// Route a tool call to the appropriate handler via the dispatcher.
     fn call_tool(
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + MaybeSendFuture + '_
     {
-        let name = request.name.clone();
-        std::future::ready(Ok(CallToolResult::error(vec![Content::text(format!(
-            "tool not found: '{name}' — call tools/list to see available tools"
-        ))])))
+        let ctx = ToolContext::new(Arc::clone(&self.pool), Arc::clone(&self.config));
+        async move {
+            router::dispatch(ctx, request).await.or_else(|mcp_err| {
+                // Convert McpError to CallToolResult::error so the protocol
+                // always returns a well-formed response. Only truly unrecoverable
+                // internal errors that cannot be expressed as a tool result should
+                // propagate as ErrorData — those should be extremely rare.
+                tracing::error!(error = %mcp_err, "tool handler returned McpError");
+                Ok(CallToolResult::error(vec![Content::text(
+                    mcp_err.to_json().to_string(),
+                )]))
+            })
+        }
     }
 }
 
