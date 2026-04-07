@@ -1,0 +1,88 @@
+[package]
+name = "pgmcp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A Rust MCP server for PostgreSQL — zero-overhead agent access to Postgres"
+license = "Apache-2.0"
+repository = "https://github.com/agentdb/pgmcp"
+keywords = ["mcp", "postgres", "postgresql", "agent", "llm"]
+categories = ["database", "network-programming"]
+
+[[bin]]
+name = "pgmcp"
+path = "src/main.rs"
+
+[[bench]]
+name = "serialization"
+harness = false
+
+[[bench]]
+name = "streaming"
+harness = false
+
+[[bench]]
+name = "connection"
+harness = false
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-std", "time", "macros"] }
+
+# MCP protocol implementation — updated to 1.x (plan specified 0.1 which does not exist on crates.io)
+rmcp = { version = "1", features = ["server"] }
+
+# HTTP server for SSE transport
+axum = { version = "0.8", features = ["http1", "tokio"] }
+
+# PostgreSQL wire protocol driver
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-time-0_3"] }
+
+# Connection pool for tokio-postgres
+deadpool-postgres = { version = "0.14", features = ["rt_tokio_1"] }
+
+# Serialization framework
+serde = { version = "1", features = ["derive"] }
+
+# JSON serialization for tool parameter parsing and response construction
+serde_json = "1"
+
+# SQL parser with Postgres dialect
+sqlparser = "0.61"
+
+# Date/time handling (replaces chrono — see design spec section 9.3)
+time = { version = "0.3", features = ["serde"] }
+
+# Structured logging and span instrumentation
+tracing = "0.1"
+
+# Tracing subscriber with JSON and human-readable formatters
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Derive macro for McpError — generates Display and Error impls
+thiserror = "1"
+
+# UUID type for Postgres UUID columns
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Fast float-to-string conversion; used in hot-path row encoder
+ryu = "1"
+
+# Bytes and BytesMut for zero-copy buffer management in streaming encoder
+bytes = "1"
+
+# TOML config file deserialization
+toml = "0.8"
+
+[dev-dependencies]
+# Spin up real Postgres instances in integration tests without external setup
+testcontainers = "0.27"
+
+# Benchmarking framework
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true

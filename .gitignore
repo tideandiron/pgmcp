@@ -1,0 +1,29 @@
+# Rust build artifacts
+/target/
+/debug/
+/release/
+
+# Cargo lock is committed for reproducibility; do NOT add Cargo.lock here
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Criterion benchmark results (baselines are committed; current run outputs are not)
+/target/criterion/
+
+# Environment variable files — never commit credentials
+.env
+.env.*
+!.env.example
+
+# Docker build context artifacts
+docker/*.tar.gz
+
+# pgmcp runtime artifacts
+*.pid
+/pgmcp.toml

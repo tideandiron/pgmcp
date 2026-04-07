@@ -1,0 +1,3 @@
+-- src/pg/queries/my_permissions.sql
+-- Introspects role privileges using pg_roles and has_*_privilege() functions.
+-- Implemented in feat/020.

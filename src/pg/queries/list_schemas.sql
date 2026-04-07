@@ -1,0 +1,3 @@
+-- src/pg/queries/list_schemas.sql
+-- Returns all schemas visible to the connected role, excluding pg_toast and pg_temp_*.
+-- Implemented in feat/010.

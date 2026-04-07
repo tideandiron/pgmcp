@@ -1,0 +1,91 @@
+#
+# pgmcp example configuration file.
+# Copy to pgmcp.toml and edit to match your environment.
+# All values shown are defaults unless marked REQUIRED.
+#
+# Environment variable overrides: prefix any key with PGMCP_
+# and use SCREAMING_SNAKE_CASE. Nested keys use double underscores.
+# Example: PGMCP_POOL__MAX_SIZE=20
+#
+# CLI shorthand: pgmcp postgres://user:pass@host:5432/dbname
+# The positional argument sets database_url and overrides the config file.
+
+# ─── Database ────────────────────────────────────────────────────────────────
+
+# REQUIRED. PostgreSQL connection string.
+# Supports both postgres:// URI format and libpq key=value format.
+# Example URI:     postgres://myuser:mypassword@localhost:5432/mydb?sslmode=require
+# Example key=val: host=localhost port=5432 dbname=mydb user=myuser password=mypassword
+database_url = "postgres://pgmcp:pgmcp@localhost:5432/pgmcp"
+
+# ─── Connection Pool ─────────────────────────────────────────────────────────
+
+[pool]
+# Minimum number of connections to maintain in the pool at all times.
+# Pool initialization at startup fails (exit code 5) if min_size connections
+# cannot be established. Set to 0 to allow startup with no Postgres connectivity.
+min_size = 2
+
+# Maximum number of connections the pool will open simultaneously.
+# Requests that arrive when all connections are in use will wait up to
+# acquire_timeout_seconds before failing with pg_pool_timeout.
+max_size = 10
+
+# Seconds to wait for a connection from the pool before returning pg_pool_timeout.
+# Must be greater than 0. Fractional seconds are not supported.
+acquire_timeout_seconds = 5
+
+# Seconds a connection may remain idle before being recycled.
+# Set to 0 to disable idle timeout (connections are never recycled for idleness).
+idle_timeout_seconds = 300
+
+# ─── Transport ───────────────────────────────────────────────────────────────
+
+[transport]
+# Which transport to use. One of: "stdio", "sse".
+# stdio: reads JSON-RPC from stdin, writes to stdout. Use for process-launched MCP servers.
+# sse:   HTTP server with SSE for server-to-client streaming, POST for client-to-server.
+mode = "stdio"
+
+# Host and port for the SSE transport. Ignored when mode = "stdio".
+host = "127.0.0.1"
+port = 3000
+
+# ─── Telemetry ───────────────────────────────────────────────────────────────
+
+[telemetry]
+# Log format. One of: "json", "text".
+# json: structured JSON logs, suitable for log aggregators (production).
+# text: human-readable logs with ANSI color, suitable for development.
+log_format = "text"
+
+# Log level filter, in RUST_LOG syntax.
+# Examples: "info", "debug", "pgmcp=debug,tokio_postgres=warn"
+# The RUST_LOG environment variable takes precedence over this setting.
+log_level = "info"
+
+# ─── Schema Cache ────────────────────────────────────────────────────────────
+
+[cache]
+# Seconds between schema change polls. The cache invalidation task queries
+# pg_stat_database at this interval to detect schema changes.
+# Lower values reduce staleness; higher values reduce catalog query load.
+invalidation_interval_seconds = 30
+
+# ─── Guardrails ──────────────────────────────────────────────────────────────
+
+[guardrails]
+# Block DDL statements (CREATE, DROP, ALTER, TRUNCATE) in the query tool.
+# Set to false ONLY in tightly controlled environments where agents are trusted
+# to manage schema. The propose_migration tool is the correct way to propose DDL.
+block_ddl = true
+
+# Block COPY TO/FROM PROGRAM statements. These execute shell commands on the
+# Postgres server and are almost always a security risk. There is no legitimate
+# use case for an agent to run COPY TO PROGRAM via pgmcp.
+block_copy_program = true
+
+# Block SET statements that change session-level parameters affecting subsequent
+# callers. Examples: SET search_path, SET role, SET session_authorization.
+# Individual statement timeouts (SET LOCAL statement_timeout) are allowed.
+block_session_set = true

@@ -1,0 +1,76 @@
+#
+# cargo-deny configuration.
+# Run: cargo deny check
+# CI: enforced in the deny job of ci.yml.
+
+[graph]
+targets = []
+
+[advisories]
+# Deny all crates with known security vulnerabilities.
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+ignore = []
+
+[licenses]
+version = 2
+# Allow only permissive, well-understood licenses.
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+]
+# Copyleft and proprietary licenses are denied.
+deny = []
+# Exceptions are reviewed case-by-case; none allowed by default.
+exceptions = []
+# confidence-threshold: how confident cargo-deny must be before
+# treating a license as "identified". 0.8 is the default.
+confidence-threshold = 0.8
+
+[bans]
+version = 2
+
+# Deny duplicate versions of core dependencies to prevent version conflicts
+# that could cause subtle runtime bugs or inflated binary size.
+deny = [
+    # chrono has a soundness issue in local timezone handling; replaced by time 0.3
+    { crate = "chrono", reason = "replaced by time 0.3 (see design spec section 9.3)" },
+    # anyhow erases error types; McpError is the explicit product error surface
+    { crate = "anyhow", reason = "McpError is the error surface; type erasure is prohibited" },
+    # eyre erases error types for the same reason as anyhow
+    { crate = "eyre", reason = "McpError is the error surface; type erasure is prohibited" },
+    # once_cell / lazy_static introduce implicit global state
+    { crate = "once_cell", reason = "no global state allowed; use Arc injection via ToolContext" },
+    { crate = "lazy_static", reason = "no global state allowed; use Arc injection via ToolContext" },
+]
+
+# Multiple versions of these crates cause subtle bugs and inflated binaries.
+# All must resolve to a single version.
+[[bans.deny]]
+crate = "tokio"
+version = "*"
+wrappers = []
+
+[[bans.deny]]
+crate = "serde"
+version = "*"
+wrappers = []
+
+[[bans.deny]]
+crate = "serde_json"
+version = "*"
+wrappers = []
+
+[sources]
+version = 2
+# Only allow crates from crates.io. Git sources and path overrides must be
+# explicitly declared here during development; all must be removed before release.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -1,0 +1,3 @@
+-- src/pg/queries/list_extensions.sql
+-- Returns all installed extensions in the current database.
+-- Implemented in feat/012.

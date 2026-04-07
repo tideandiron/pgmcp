@@ -1,0 +1,3 @@
+-- src/pg/queries/table_stats.sql
+-- Returns runtime statistics for a table from pg_stat_user_tables and pg_class.
+-- Implemented in feat/012.

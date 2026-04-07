@@ -1,0 +1,3 @@
+-- src/pg/queries/describe_table.sql
+-- Returns full table definition: columns, constraints, indexes, foreign keys.
+-- Implemented in feat/011.

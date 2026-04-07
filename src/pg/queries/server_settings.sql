@@ -1,0 +1,3 @@
+-- src/pg/queries/server_settings.sql
+-- Returns server version and key settings for server_info tool.
+-- Implemented in feat/009.

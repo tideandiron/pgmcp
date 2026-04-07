@@ -1,0 +1,3 @@
+-- src/pg/queries/list_databases.sql
+-- Returns the list of databases visible to the connected role.
+-- Implemented in feat/009.

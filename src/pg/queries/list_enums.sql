@@ -1,0 +1,3 @@
+-- src/pg/queries/list_enums.sql
+-- Returns all enum types in a schema with their ordered label values.
+-- Implemented in feat/011.

@@ -1,0 +1,3 @@
+-- src/pg/queries/list_tables.sql
+-- Returns tables, views, and materialized views in a schema.
+-- Implemented in feat/010.
