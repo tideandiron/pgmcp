@@ -14,7 +14,7 @@ use config::CliArgs;
 
 fn main() {
     let args = CliArgs::parse();
-    let _config = match config::Config::load(
+    let config = match config::Config::load(
         args.config.as_deref(),
         args.connection_string.as_deref(),
         args.transport.as_deref(),
@@ -25,5 +25,15 @@ fn main() {
             std::process::exit(2);
         }
     };
-    // Startup sequence continues in feat/003 (telemetry) and feat/005 (pool).
+
+    if let Err(e) =
+        telemetry::init_telemetry(config.telemetry.log_format, &config.telemetry.log_level)
+    {
+        eprintln!("pgmcp: telemetry error: {e}");
+        std::process::exit(2);
+    }
+
+    tracing::info!("pgmcp starting");
+
+    // Startup sequence continues in feat/005 (pool).
 }
