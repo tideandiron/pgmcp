@@ -59,9 +59,6 @@ tracing = "0.1"
 # Tracing subscriber with JSON and human-readable formatters
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-# Derive macro for McpError — generates Display and Error impls
-thiserror = "1"
-
 # UUID type for Postgres UUID columns
 uuid = { version = "1", features = ["v4", "serde"] }
 
