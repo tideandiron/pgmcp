@@ -13,6 +13,10 @@ categories = ["database", "network-programming"]
 name = "pgmcp"
 path = "src/main.rs"
 
+[lib]
+name = "pgmcp"
+path = "src/lib.rs"
+
 [[bench]]
 name = "serialization"
 harness = false
@@ -30,7 +34,7 @@ harness = false
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-std", "time", "macros"] }
 
 # MCP protocol implementation — updated to 1.x (plan specified 0.1 which does not exist on crates.io)
-rmcp = { version = "1", features = ["server"] }
+rmcp = { version = "1", features = ["server", "transport-streamable-http-server"] }
 
 # HTTP server for SSE transport
 axum = { version = "0.8", features = ["http1", "tokio"] }
@@ -67,6 +71,10 @@ ryu = "1"
 
 # Bytes and BytesMut for zero-copy buffer management in streaming encoder
 bytes = "1"
+
+# Cancellation token and sync utilities (needed for feat/006 shutdown handling)
+# Note: tokio-util 0.7 does not have a "sync" feature; CancellationToken lives under "rt".
+tokio-util = { version = "0.7", features = ["rt"] }
 
 # TOML config file deserialization
 toml = "0.8"

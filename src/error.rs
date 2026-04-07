@@ -23,7 +23,7 @@
 /// dependencies (tokio-postgres, toml, etc.) are converted to `McpError` at
 /// the module boundary and the original error is stored as `source` for logging.
 #[derive(Debug)]
-pub(crate) struct McpError {
+pub struct McpError {
     /// Machine-readable error code. Lowercase snake_case. Stable across versions.
     code: &'static str,
 
@@ -45,7 +45,7 @@ impl McpError {
     ///
     /// Typical causes: bad env var value, missing required field in TOML,
     /// invalid combination of options.
-    pub(crate) fn config_invalid(message: impl Into<String>) -> Self {
+    pub fn config_invalid(message: impl Into<String>) -> Self {
         Self {
             code: "config_invalid",
             message: message.into(),
@@ -60,7 +60,7 @@ impl McpError {
     ///
     /// Typical causes: wrong host, firewall blocking the port, bad credentials,
     /// Postgres not running.
-    pub(crate) fn pg_connect_failed(message: impl Into<String>) -> Self {
+    pub fn pg_connect_failed(message: impl Into<String>) -> Self {
         Self {
             code: "pg_connect_failed",
             message: message.into(),
@@ -73,7 +73,7 @@ impl McpError {
     }
 
     /// Postgres version is below the minimum supported version (14).
-    pub(crate) fn pg_version_unsupported(message: impl Into<String>) -> Self {
+    pub fn pg_version_unsupported(message: impl Into<String>) -> Self {
         Self {
             code: "pg_version_unsupported",
             message: message.into(),
@@ -88,7 +88,7 @@ impl McpError {
     ///
     /// Typical causes: syntax error, permission denied, constraint violation,
     /// function does not exist.
-    pub(crate) fn pg_query_failed(message: impl Into<String>) -> Self {
+    pub fn pg_query_failed(message: impl Into<String>) -> Self {
         Self {
             code: "pg_query_failed",
             message: message.into(),
@@ -101,7 +101,7 @@ impl McpError {
     }
 
     /// Could not acquire a connection from the pool within the configured timeout.
-    pub(crate) fn pg_pool_timeout(message: impl Into<String>) -> Self {
+    pub fn pg_pool_timeout(message: impl Into<String>) -> Self {
         Self {
             code: "pg_pool_timeout",
             message: message.into(),
@@ -117,7 +117,7 @@ impl McpError {
     ///
     /// Typical causes: agent typo, using a tool name from a different version
     /// of pgmcp, or a cloud-only tool in the OSS server.
-    pub(crate) fn tool_not_found(tool_name: impl Into<String>) -> Self {
+    pub fn tool_not_found(tool_name: impl Into<String>) -> Self {
         let name = tool_name.into();
         let hint = format!(
             "The tool '{name}' does not exist. Call tools/list to see the available tools \
@@ -132,7 +132,7 @@ impl McpError {
     }
 
     /// Tool parameter missing, wrong type, or failed validation.
-    pub(crate) fn param_invalid(field: impl Into<String>, reason: impl Into<String>) -> Self {
+    pub fn param_invalid(field: impl Into<String>, reason: impl Into<String>) -> Self {
         let field = field.into();
         let reason = reason.into();
         let hint = format!(
@@ -151,7 +151,7 @@ impl McpError {
     ///
     /// Typical causes: DDL in the query tool, COPY TO/FROM PROGRAM,
     /// SET statements that affect session state.
-    pub(crate) fn guardrail_violation(reason: impl Into<String>) -> Self {
+    pub fn guardrail_violation(reason: impl Into<String>) -> Self {
         let reason = reason.into();
         Self {
             code: "guardrail_violation",
@@ -166,7 +166,7 @@ impl McpError {
     }
 
     /// SQL statement did not parse with the Postgres dialect parser.
-    pub(crate) fn sql_parse_error(reason: impl Into<String>) -> Self {
+    pub fn sql_parse_error(reason: impl Into<String>) -> Self {
         let reason = reason.into();
         Self {
             code: "sql_parse_error",
@@ -180,7 +180,7 @@ impl McpError {
     }
 
     /// The specified schema does not exist in the database.
-    pub(crate) fn schema_not_found(schema: impl Into<String>) -> Self {
+    pub fn schema_not_found(schema: impl Into<String>) -> Self {
         let schema = schema.into();
         let hint = format!(
             "Schema '{schema}' does not exist or is not visible to the connected role. \
@@ -195,7 +195,7 @@ impl McpError {
     }
 
     /// The specified table does not exist in the given schema.
-    pub(crate) fn table_not_found(schema: impl Into<String>, table: impl Into<String>) -> Self {
+    pub fn table_not_found(schema: impl Into<String>, table: impl Into<String>) -> Self {
         let schema = schema.into();
         let table = table.into();
         let hint = format!(
@@ -214,7 +214,7 @@ impl McpError {
     ///
     /// Presence of this error in production logs indicates a bug that should
     /// be filed and fixed.
-    pub(crate) fn internal(message: impl Into<String>) -> Self {
+    pub fn internal(message: impl Into<String>) -> Self {
         Self {
             code: "internal",
             message: message.into(),
@@ -241,10 +241,7 @@ impl McpError {
     ///         .with_source(e)
     /// })?;
     /// ```
-    pub(crate) fn with_source(
-        mut self,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
+    pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         self.source = Some(Box::new(source));
         self
     }
@@ -255,17 +252,17 @@ impl McpError {
     ///
     /// This is the stable, lowercase_snake_case identifier for the error kind.
     /// Agents should use this field for programmatic error handling.
-    pub(crate) fn code(&self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         self.code
     }
 
     /// Returns the human-readable message.
-    pub(crate) fn message(&self) -> &str {
+    pub fn message(&self) -> &str {
         &self.message
     }
 
     /// Returns the agent-actionable hint.
-    pub(crate) fn hint(&self) -> &str {
+    pub fn hint(&self) -> &str {
         &self.hint
     }
 
@@ -279,7 +276,7 @@ impl McpError {
     /// The `source` field is intentionally excluded. Raw database errors may
     /// contain sensitive information (query text, schema names, constraint names)
     /// and must not be forwarded to agents.
-    pub(crate) fn to_json(&self) -> serde_json::Value {
+    pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "code": self.code,
             "message": self.message,

@@ -22,50 +22,50 @@ use serde::Deserialize;
 /// Deserialized from a TOML file. All fields have defaults so that a config
 /// file containing only `database_url` is valid.
 #[derive(Debug, Deserialize)]
-pub(crate) struct Config {
+pub struct Config {
     /// PostgreSQL connection string (URI or libpq key=value format). Required.
-    pub(crate) database_url: String,
+    pub database_url: String,
 
     /// Connection pool settings.
     #[serde(default)]
-    pub(crate) pool: PoolConfig,
+    pub pool: PoolConfig,
 
     /// Transport selection and binding.
     #[serde(default)]
-    pub(crate) transport: TransportConfig,
+    pub transport: TransportConfig,
 
     /// Telemetry and logging.
     #[serde(default)]
-    pub(crate) telemetry: TelemetryConfig,
+    pub telemetry: TelemetryConfig,
 
     /// Schema cache invalidation.
     #[serde(default)]
-    pub(crate) cache: CacheConfig,
+    pub cache: CacheConfig,
 
     /// SQL guardrail policies.
     #[serde(default)]
-    pub(crate) guardrails: GuardrailConfig,
+    pub guardrails: GuardrailConfig,
 }
 
 /// Connection pool configuration.
 #[derive(Debug, Deserialize)]
-pub(crate) struct PoolConfig {
+pub struct PoolConfig {
     /// Minimum connections to maintain. Pool init fails at startup if this
     /// many connections cannot be established.
     #[serde(default = "default_pool_min_size")]
-    pub(crate) min_size: u32,
+    pub min_size: u32,
 
     /// Maximum connections the pool will open simultaneously.
     #[serde(default = "default_pool_max_size")]
-    pub(crate) max_size: u32,
+    pub max_size: u32,
 
     /// Seconds to wait for a connection before returning `pg_pool_timeout`.
     #[serde(default = "default_acquire_timeout")]
-    pub(crate) acquire_timeout_seconds: u64,
+    pub acquire_timeout_seconds: u64,
 
     /// Seconds an idle connection is kept before recycling. 0 = never recycle.
     #[serde(default = "default_idle_timeout")]
-    pub(crate) idle_timeout_seconds: u64,
+    pub idle_timeout_seconds: u64,
 }
 
 impl Default for PoolConfig {
@@ -95,7 +95,7 @@ fn default_idle_timeout() -> u64 {
 /// Which transport the server listens on.
 #[derive(Debug, Default, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum TransportMode {
+pub enum TransportMode {
     /// Read JSON-RPC from stdin, write to stdout.
     #[default]
     Stdio,
@@ -105,18 +105,18 @@ pub(crate) enum TransportMode {
 
 /// Transport binding configuration.
 #[derive(Debug, Deserialize)]
-pub(crate) struct TransportConfig {
+pub struct TransportConfig {
     /// Which transport to activate.
     #[serde(default)]
-    pub(crate) mode: TransportMode,
+    pub mode: TransportMode,
 
     /// Bind host for the SSE transport. Ignored for stdio.
     #[serde(default = "default_transport_host")]
-    pub(crate) host: String,
+    pub host: String,
 
     /// Bind port for the SSE transport. Ignored for stdio.
     #[serde(default = "default_transport_port")]
-    pub(crate) port: u16,
+    pub port: u16,
 }
 
 impl Default for TransportConfig {
@@ -139,7 +139,7 @@ fn default_transport_port() -> u16 {
 /// Log output format.
 #[derive(Debug, Default, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum LogFormat {
+pub enum LogFormat {
     /// Structured JSON logs, suitable for log aggregators.
     Json,
     /// Human-readable logs with ANSI color, suitable for development.
@@ -149,15 +149,15 @@ pub(crate) enum LogFormat {
 
 /// Telemetry and logging configuration.
 #[derive(Debug, Deserialize)]
-pub(crate) struct TelemetryConfig {
+pub struct TelemetryConfig {
     /// Log format: "json" or "text".
     #[serde(default)]
-    pub(crate) log_format: LogFormat,
+    pub log_format: LogFormat,
 
     /// Log level filter in RUST_LOG syntax.
     /// The `RUST_LOG` environment variable takes precedence.
     #[serde(default = "default_log_level")]
-    pub(crate) log_level: String,
+    pub log_level: String,
 }
 
 impl Default for TelemetryConfig {
@@ -175,10 +175,10 @@ fn default_log_level() -> String {
 
 /// Schema cache invalidation configuration.
 #[derive(Debug, Deserialize)]
-pub(crate) struct CacheConfig {
+pub struct CacheConfig {
     /// Seconds between pg_catalog polls for schema changes.
     #[serde(default = "default_invalidation_interval")]
-    pub(crate) invalidation_interval_seconds: u64,
+    pub invalidation_interval_seconds: u64,
 }
 
 impl Default for CacheConfig {
@@ -195,18 +195,18 @@ fn default_invalidation_interval() -> u64 {
 
 /// SQL guardrail policy configuration.
 #[derive(Debug, Deserialize)]
-pub(crate) struct GuardrailConfig {
+pub struct GuardrailConfig {
     /// Block DDL statements (CREATE, DROP, ALTER, TRUNCATE) in the query tool.
     #[serde(default = "default_true")]
-    pub(crate) block_ddl: bool,
+    pub block_ddl: bool,
 
     /// Block COPY TO/FROM PROGRAM statements.
     #[serde(default = "default_true")]
-    pub(crate) block_copy_program: bool,
+    pub block_copy_program: bool,
 
     /// Block SET statements that change session-level parameters.
     #[serde(default = "default_true")]
-    pub(crate) block_session_set: bool,
+    pub block_session_set: bool,
 }
 
 impl Default for GuardrailConfig {
@@ -231,14 +231,14 @@ impl Config {
     ///
     /// This method exists for testing. In production, use `apply_env_overrides`.
     /// Keys must use the `PGMCP_` prefix and `__` as the nested separator.
-    pub(crate) fn apply_env_overrides_from(&mut self, overrides: &[(&str, &str)]) {
+    pub fn apply_env_overrides_from(&mut self, overrides: &[(&str, &str)]) {
         for (key, value) in overrides {
             self.apply_single_env_override(key, value);
         }
     }
 
     /// Apply all `PGMCP_*` environment variables from the current process environment.
-    pub(crate) fn apply_env_overrides(&mut self) {
+    pub fn apply_env_overrides(&mut self) {
         let pairs: Vec<(String, String)> = std::env::vars()
             .filter(|(k, _)| k.starts_with("PGMCP_"))
             .collect();
@@ -342,7 +342,7 @@ impl Config {
     }
 
     /// Override `database_url` from the CLI positional connection string argument.
-    pub(crate) fn apply_cli_connection_string(&mut self, conn_str: &str) {
+    pub fn apply_cli_connection_string(&mut self, conn_str: &str) {
         self.database_url = conn_str.to_string();
     }
 
@@ -350,7 +350,7 @@ impl Config {
     ///
     /// Returns `Ok(())` when all constraints are satisfied.
     /// Returns `Err(String)` with a human-readable description of the first violation.
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.database_url.is_empty() {
             return Err(
                 "database_url is required. Set it in the config file or via \
@@ -387,7 +387,7 @@ impl Config {
     /// 5. Validate the merged result.
     ///
     /// Returns the merged, validated Config or an error string.
-    pub(crate) fn load(
+    pub fn load(
         config_path: Option<&str>,
         cli_connection_string: Option<&str>,
         cli_transport: Option<&str>,
@@ -440,15 +440,15 @@ impl Config {
 /// positional). Using a hand-rolled parser keeps compile times short and
 /// avoids pulling in clap for ~30 lines of work.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct CliArgs {
+pub struct CliArgs {
     /// Path to the TOML config file. Corresponds to `--config <path>`.
-    pub(crate) config: Option<String>,
+    pub config: Option<String>,
 
     /// Transport mode override. Corresponds to `--transport <stdio|sse>`.
-    pub(crate) transport: Option<String>,
+    pub transport: Option<String>,
 
     /// Positional connection string: `pgmcp postgres://...`
-    pub(crate) connection_string: Option<String>,
+    pub connection_string: Option<String>,
 }
 
 impl CliArgs {
@@ -461,7 +461,7 @@ impl CliArgs {
     /// - A positional argument beginning with `postgres://` or containing `host=`
     ///
     /// Unknown flags produce a usage message to stderr and a non-zero exit.
-    pub(crate) fn parse_from(mut args: impl Iterator<Item = String>) -> Self {
+    pub fn parse_from(mut args: impl Iterator<Item = String>) -> Self {
         // Skip argv[0] (the binary name).
         let _ = args.next();
         let mut parsed = Self::default();
@@ -510,7 +510,7 @@ impl CliArgs {
     }
 
     /// Parse from the real process argv.
-    pub(crate) fn parse() -> Self {
+    pub fn parse() -> Self {
         Self::parse_from(std::env::args())
     }
 
