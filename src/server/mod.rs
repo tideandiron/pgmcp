@@ -14,7 +14,7 @@
 
 #![allow(dead_code)]
 
-pub(crate) mod context;
+pub mod context;
 pub(crate) mod router;
 pub(crate) mod tool_defs;
 

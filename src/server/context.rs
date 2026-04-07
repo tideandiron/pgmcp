@@ -19,7 +19,7 @@ use crate::{config::Config, pg::pool::Pool};
 /// Created by the dispatcher, passed by value to each tool handler.
 /// All fields are `Arc`-wrapped so cloning is cheap.
 #[derive(Clone)]
-pub(crate) struct ToolContext {
+pub struct ToolContext {
     /// Connection pool for acquiring Postgres connections.
     pub(crate) pool: Arc<Pool>,
 
@@ -31,7 +31,7 @@ pub(crate) struct ToolContext {
 
 impl ToolContext {
     /// Create a new `ToolContext`.
-    pub(crate) fn new(pool: Arc<Pool>, config: Arc<Config>) -> Self {
+    pub fn new(pool: Arc<Pool>, config: Arc<Config>) -> Self {
         Self { pool, config }
     }
 }
