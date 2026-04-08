@@ -29,7 +29,7 @@ use rmcp::model::{CallToolResult, Content};
 use serde_json::{Map, Value};
 use tokio_postgres::Row;
 
-use crate::{error::McpError, server::context::ToolContext};
+use crate::{error::McpError, pg::infer::infer_column_description, server::context::ToolContext};
 
 /// Map a `contype` byte (Postgres internal `"char"` type, received as `i8`)
 /// to a human-readable constraint type string.
@@ -70,7 +70,11 @@ fn build_column(row: &Row) -> Value {
     let col_type: String = row.get(1);
     let not_null: bool = row.get(2);
     let default_value: Option<String> = row.get(3);
-    let description: Option<String> = row.get(4);
+    let explicit_description: Option<String> = row.get(4);
+
+    // Use explicit COMMENT when available; fall back to heuristic inference.
+    let description = explicit_description.or_else(|| infer_column_description(&name, &col_type));
+
     serde_json::json!({
         "name":        name,
         "type":        col_type,

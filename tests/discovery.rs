@@ -1657,3 +1657,123 @@ async fn test_table_stats_last_analyze_set_after_analyze() {
         v["last_analyze"]
     );
 }
+
+// ── inferred column descriptions (feat/023) ───────────────────────────────────
+
+/// describe_table returns inferred descriptions for columns without COMMENTs.
+#[tokio::test]
+async fn test_describe_table_inferred_descriptions() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+
+    // Create a table with columns that have standard naming conventions
+    // but no explicit COMMENTs — all descriptions should be inferred.
+    {
+        use tokio_postgres::NoTls;
+        let (client, conn) = tokio_postgres::connect(&url, NoTls)
+            .await
+            .expect("direct connect");
+        tokio::spawn(conn);
+        client
+            .execute(
+                "CREATE TABLE IF NOT EXISTS public.infer_test ( \
+                   id         SERIAL PRIMARY KEY, \
+                   user_id    INTEGER, \
+                   email      TEXT, \
+                   is_active  BOOLEAN, \
+                   created_at TIMESTAMPTZ, \
+                   status     TEXT \
+                 )",
+                &[],
+            )
+            .await
+            .expect("create infer_test table");
+    }
+
+    let args: Option<serde_json::Map<String, serde_json::Value>> =
+        serde_json::from_str(r#"{"table":"infer_test","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    let columns = v["columns"].as_array().expect("columns must be array");
+
+    // Find each column by name and verify description is non-null.
+    let find_col = |name: &str| columns.iter().find(|c| c["name"].as_str() == Some(name));
+
+    // id — should be "Primary key (auto-incrementing integer)"
+    let id_col = find_col("id").expect("id column must exist");
+    assert!(
+        id_col["description"].is_string(),
+        "id column should have inferred description, got: {:?}",
+        id_col["description"]
+    );
+    let id_desc = id_col["description"].as_str().unwrap();
+    assert!(
+        id_desc.to_lowercase().contains("primary"),
+        "id description should mention primary key: {id_desc}"
+    );
+
+    // email — should mention "email"
+    let email_col = find_col("email").expect("email column must exist");
+    assert!(
+        email_col["description"].is_string(),
+        "email column should have inferred description"
+    );
+    let email_desc = email_col["description"].as_str().unwrap();
+    assert!(
+        email_desc.to_lowercase().contains("email"),
+        "email description should mention email: {email_desc}"
+    );
+
+    // created_at — should mention "created"
+    let cat_col = find_col("created_at").expect("created_at column must exist");
+    assert!(
+        cat_col["description"].is_string(),
+        "created_at column should have inferred description"
+    );
+    let cat_desc = cat_col["description"].as_str().unwrap();
+    assert!(
+        cat_desc.to_lowercase().contains("creat"),
+        "created_at description should mention created: {cat_desc}"
+    );
+}
+
+/// describe_table uses explicit COMMENT over inferred description.
+#[tokio::test]
+async fn test_describe_table_explicit_comment_takes_priority() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+
+    // dt_parent already has a COMMENT on the `name` column ("The display name").
+    create_describe_table_fixtures(&url).await;
+
+    let args: Option<serde_json::Map<String, serde_json::Value>> =
+        serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    let columns = v["columns"].as_array().expect("columns must be array");
+    let name_col = columns
+        .iter()
+        .find(|c| c["name"].as_str() == Some("name"))
+        .expect("name column must exist");
+
+    let desc = name_col["description"]
+        .as_str()
+        .expect("name must have description");
+    // Explicit COMMENT wins over inferred — must be the exact COMMENT text.
+    assert_eq!(
+        desc, "The display name",
+        "explicit COMMENT must take priority over inferred description"
+    );
+}
