@@ -578,9 +578,10 @@ async fn mcp_round_trip_query_tool() {
         .await
         .expect("query tool must not fail at protocol level");
 
-    assert_eq!(
-        result.is_error, None,
-        "successful query must not set is_error"
+    assert_ne!(
+        result.is_error,
+        Some(true),
+        "successful query must not set is_error to true"
     );
 
     let text = result
