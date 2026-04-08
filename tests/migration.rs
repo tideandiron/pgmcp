@@ -98,9 +98,9 @@ async fn migration_pg_version_from_real_db() {
     let parsed: Value = serde_json::from_str(get_text(&result)).expect("valid JSON");
     let ver = parsed["pg_version"].as_str().unwrap_or("unknown");
     assert_ne!(ver, "unknown", "pg_version should be detected from real DB");
-    // The test image is postgres:16-alpine
+    // CI matrix tests PG 14-17; default local image is postgres:16-alpine
     assert!(
-        ver.starts_with("16") || ver.starts_with("15") || ver.starts_with("14"),
+        ver.starts_with("17") || ver.starts_with("16") || ver.starts_with("15") || ver.starts_with("14"),
         "expected modern PG version, got: {ver}"
     );
 }
