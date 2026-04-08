@@ -84,6 +84,16 @@ docker compose logs -f pgmcp
 
 See [`docker-compose.yml`](docker-compose.yml) for full configuration options.
 
+## Demo
+
+A pre-built demo database is included for evaluating all 15 tools:
+
+```bash
+docker compose up -d    # starts PostgreSQL with demo data
+```
+
+See [`demo/README.md`](demo/README.md) for a walkthrough of every tool with example queries.
+
 ## Configuration
 
 pgmcp reads configuration from `pgmcp.toml` in the current directory. See [`config/pgmcp.example.toml`](config/pgmcp.example.toml) for all available options with documentation.
