@@ -1490,6 +1490,10 @@ async fn test_table_stats_sizes_are_non_negative() {
 
 /// table_stats after inserting 100 rows and running ANALYZE shows non-zero
 /// live_tuples. (pg_stat_user_tables is updated by ANALYZE.)
+///
+/// The PostgreSQL statistics collector is asynchronous; `pg_stat_user_tables`
+/// may not reflect the ANALYZE result immediately on a loaded CI runner.  We
+/// retry up to 5 times with 500 ms between each attempt before failing.
 #[tokio::test]
 async fn test_table_stats_live_tuples_after_insert_and_analyze() {
     let Some((_container, url)) = common::fixtures::pg_container().await else {
@@ -1498,16 +1502,26 @@ async fn test_table_stats_live_tuples_after_insert_and_analyze() {
     };
     create_stats_test_table(&url, "ts_live_tuples", true).await;
 
-    let args = serde_json::from_str(r#"{"table":"ts_live_tuples","schema":"public"}"#).ok();
-    let result = table_stats::handle(test_ctx(&url), args)
-        .await
-        .expect("table_stats must succeed for ts_live_tuples");
-    let text = result.content[0].as_text().unwrap().text.clone();
-    let v: Value = serde_json::from_str(&text).unwrap();
+    let args: Option<serde_json::Map<String, Value>> =
+        serde_json::from_str(r#"{"table":"ts_live_tuples","schema":"public"}"#).ok();
 
-    let live = v["live_tuples"]
-        .as_i64()
-        .expect("live_tuples must be an integer");
+    let mut live: i64 = 0;
+    for attempt in 1..=5u32 {
+        let result = table_stats::handle(test_ctx(&url), args.clone())
+            .await
+            .expect("table_stats must succeed for ts_live_tuples");
+        let text = result.content[0].as_text().unwrap().text.clone();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        live = v["live_tuples"]
+            .as_i64()
+            .expect("live_tuples must be an integer");
+        if live > 0 {
+            break;
+        }
+        if attempt < 5 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
     assert!(
         live > 0,
         "live_tuples must be > 0 after inserting 100 rows and running ANALYZE, got {live}"
@@ -1634,6 +1648,10 @@ async fn test_table_stats_timestamp_fields_are_null_or_rfc3339() {
 }
 
 /// table_stats last_analyze is non-null after running ANALYZE.
+///
+/// The PostgreSQL statistics collector is asynchronous; `pg_stat_user_tables`
+/// may not reflect the ANALYZE result immediately on a loaded CI runner.  We
+/// retry up to 5 times with 500 ms between each attempt before failing.
 #[tokio::test]
 async fn test_table_stats_last_analyze_set_after_analyze() {
     let Some((_container, url)) = common::fixtures::pg_container().await else {
@@ -1643,18 +1661,30 @@ async fn test_table_stats_last_analyze_set_after_analyze() {
     // create_stats_test_table with insert_rows=true runs ANALYZE.
     create_stats_test_table(&url, "ts_last_analyze", true).await;
 
-    let args = serde_json::from_str(r#"{"table":"ts_last_analyze","schema":"public"}"#).ok();
-    let result = table_stats::handle(test_ctx(&url), args)
-        .await
-        .expect("table_stats must succeed");
-    let text = result.content[0].as_text().unwrap().text.clone();
-    let v: Value = serde_json::from_str(&text).unwrap();
+    let args: Option<serde_json::Map<String, Value>> =
+        serde_json::from_str(r#"{"table":"ts_last_analyze","schema":"public"}"#).ok();
 
+    let mut last_analyze_is_set = false;
+    let mut last_analyze_val = Value::Null;
+    for attempt in 1..=5u32 {
+        let result = table_stats::handle(test_ctx(&url), args.clone())
+            .await
+            .expect("table_stats must succeed");
+        let text = result.content[0].as_text().unwrap().text.clone();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        last_analyze_val = v["last_analyze"].clone();
+        if last_analyze_val.is_string() {
+            last_analyze_is_set = true;
+            break;
+        }
+        if attempt < 5 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
     // After an explicit ANALYZE, last_analyze must be a non-null string.
     assert!(
-        v["last_analyze"].is_string(),
-        "last_analyze must be non-null after ANALYZE, got: {:?}",
-        v["last_analyze"]
+        last_analyze_is_set,
+        "last_analyze must be non-null after ANALYZE, got: {last_analyze_val:?}"
     );
 }
 
