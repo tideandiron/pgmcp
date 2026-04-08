@@ -736,8 +736,7 @@ mod tests {
             let arr = required.as_array().expect("'required' must be an array");
             assert!(
                 !arr.is_empty(),
-                "tool '{}' has required parameters but 'required' array is empty",
-                tool_name
+                "tool '{tool_name}' has required parameters but 'required' array is empty"
             );
         }
     }

@@ -700,8 +700,7 @@ mod tests {
         let desc = infer(name, ty);
         assert!(
             desc.is_none(),
-            "expected None for ({name}, {ty}) but got: {:?}",
-            desc
+            "expected None for ({name}, {ty}) but got: {desc:?}"
         );
     }
 
