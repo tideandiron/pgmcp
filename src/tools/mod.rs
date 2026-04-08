@@ -10,7 +10,7 @@ pub mod list_schemas;
 pub mod list_tables;
 pub(crate) mod my_permissions;
 pub(crate) mod propose_migration;
-pub(crate) mod query;
+pub mod query;
 pub(crate) mod query_events;
 pub mod server_info;
 pub(crate) mod suggest_index;
