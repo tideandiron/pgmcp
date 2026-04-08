@@ -9,8 +9,9 @@
 //  4. Build connection pool
 //  5. Check Postgres version (exit 4 if < 14)
 //  6. Health check (exit 5 if pool unhealthy)
-//  7. Initialize server and transport
-//  8. Begin serving
+//  7a. Initial schema cache load (blocks until complete)
+//  7b. Spawn background invalidation task
+//  8. Start transport
 
 #![deny(warnings)]
 
@@ -88,12 +89,36 @@ async fn main() {
 
     let config = Arc::new(config);
 
-    // Step 7-8: Start transport.
+    // Step 7a: Initial schema cache load (blocks until complete).
+    let cache = match pg::cache::SchemaCache::load_from_pool(&pool).await {
+        Ok(c) => {
+            tracing::info!("schema cache populated at startup");
+            Arc::new(c)
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "failed to populate schema cache at startup");
+            eprintln!("pgmcp: schema cache error: {e}");
+            std::process::exit(5);
+        }
+    };
+
+    // Step 7b: Spawn background invalidation task.
+    let _invalidation_handle = pg::invalidation::spawn_invalidation_task(
+        Arc::clone(&cache),
+        Arc::clone(&pool),
+        config.cache.invalidation_interval_seconds,
+    );
+    // _invalidation_handle is intentionally not awaited; it runs until process exit.
+    // Dropping main's handle aborts the task when main exits.
+
+    // Step 8: Start transport.
     let transport_mode = config.transport.mode;
     tracing::info!(transport = ?transport_mode, "starting transport");
 
     let result = match transport_mode {
-        TransportMode::Stdio => transport::stdio::run(Arc::clone(&pool), Arc::clone(&config)).await,
+        TransportMode::Stdio => {
+            transport::stdio::run(Arc::clone(&pool), Arc::clone(&cache), Arc::clone(&config)).await
+        }
         TransportMode::Sse => {
             let ct = CancellationToken::new();
 
@@ -105,7 +130,13 @@ async fn main() {
                 ct_signal.cancel();
             });
 
-            transport::sse::run(Arc::clone(&pool), Arc::clone(&config), ct).await
+            transport::sse::run(
+                Arc::clone(&pool),
+                Arc::clone(&cache),
+                Arc::clone(&config),
+                ct,
+            )
+            .await
         }
     };
 

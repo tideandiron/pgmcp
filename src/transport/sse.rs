@@ -17,7 +17,12 @@ use rmcp::transport::streamable_http_server::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::Config, error::McpError, pg::pool::Pool, server::PgMcpServer};
+use crate::{
+    config::Config,
+    error::McpError,
+    pg::{cache::SchemaCache, pool::Pool},
+    server::PgMcpServer,
+};
 
 /// Run the MCP server over HTTP with SSE streaming.
 ///
@@ -31,12 +36,14 @@ use crate::{config::Config, error::McpError, pg::pool::Pool, server::PgMcpServer
 /// encounters a fatal error.
 pub(crate) async fn run(
     pool: Arc<Pool>,
+    cache: Arc<SchemaCache>,
     config: Arc<Config>,
     ct: CancellationToken,
 ) -> Result<(), McpError> {
     let bind_addr = format!("{}:{}", config.transport.host, config.transport.port);
 
     let pool_clone = Arc::clone(&pool);
+    let cache_clone = Arc::clone(&cache);
     let config_clone = Arc::clone(&config);
 
     let http_config = StreamableHttpServerConfig::default()
@@ -45,12 +52,13 @@ pub(crate) async fn run(
         .with_cancellation_token(ct.child_token());
 
     // The factory closure is called once per MCP session (once per initialize
-    // request). PgMcpServer::new is cheap — it only clones two Arcs.
+    // request). PgMcpServer::new is cheap — it only clones three Arcs.
     let service: StreamableHttpService<PgMcpServer, LocalSessionManager> =
         StreamableHttpService::new(
             move || {
                 Ok(PgMcpServer::new(
                     Arc::clone(&pool_clone),
+                    Arc::clone(&cache_clone),
                     Arc::clone(&config_clone),
                 ))
             },

@@ -3,16 +3,16 @@
 // ToolContext — per-call execution context injected into every tool handler.
 //
 // Constructed by the dispatcher once per `tools/call` request. Contains
-// Arc clones of the shared resources (pool, config). Passing ToolContext
+// Arc clones of the shared resources (pool, cache, config). Passing ToolContext
 // by value to handlers allows them to take ownership without Clone bounds
 // on the resources themselves.
-//
-// SchemaCache is intentionally absent in Phase 2; it is added in feat/013.
-// The field is listed as a comment to document the future shape.
 
 use std::sync::Arc;
 
-use crate::{config::Config, pg::pool::Pool};
+use crate::{
+    config::Config,
+    pg::{cache::SchemaCache, pool::Pool},
+};
 
 /// Execution context for a single tool call.
 ///
@@ -23,16 +23,22 @@ pub struct ToolContext {
     /// Connection pool for acquiring Postgres connections.
     pub(crate) pool: Arc<Pool>,
 
+    /// In-memory schema cache populated at startup and refreshed by the
+    /// background invalidation task.
+    pub(crate) cache: Arc<SchemaCache>,
+
     /// Application configuration.
     pub(crate) config: Arc<Config>,
-    // SchemaCache is added in feat/013:
-    // pub(crate) cache: Arc<SchemaCache>,
 }
 
 impl ToolContext {
     /// Create a new `ToolContext`.
-    pub fn new(pool: Arc<Pool>, config: Arc<Config>) -> Self {
-        Self { pool, config }
+    pub fn new(pool: Arc<Pool>, cache: Arc<SchemaCache>, config: Arc<Config>) -> Self {
+        Self {
+            pool,
+            cache,
+            config,
+        }
     }
 }
 

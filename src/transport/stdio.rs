@@ -16,7 +16,12 @@ use std::sync::Arc;
 
 use rmcp::ServiceExt as _;
 
-use crate::{config::Config, error::McpError, pg::pool::Pool, server::PgMcpServer};
+use crate::{
+    config::Config,
+    error::McpError,
+    pg::{cache::SchemaCache, pool::Pool},
+    server::PgMcpServer,
+};
 
 /// Run the MCP server over stdin/stdout.
 ///
@@ -28,8 +33,12 @@ use crate::{config::Config, error::McpError, pg::pool::Pool, server::PgMcpServer
 /// Returns [`McpError`] if rmcp fails to initialize the protocol handshake.
 /// Transport-level errors (EOF, broken pipe) are treated as clean shutdown
 /// and return `Ok(())`.
-pub(crate) async fn run(pool: Arc<Pool>, config: Arc<Config>) -> Result<(), McpError> {
-    let handler = PgMcpServer::new(pool, config);
+pub(crate) async fn run(
+    pool: Arc<Pool>,
+    cache: Arc<SchemaCache>,
+    config: Arc<Config>,
+) -> Result<(), McpError> {
+    let handler = PgMcpServer::new(pool, cache, config);
     // Returns (Stdin, Stdout); the tuple implements IntoTransport via TransportAdapterAsyncRW.
     let transport: (tokio::io::Stdin, tokio::io::Stdout) = rmcp::transport::io::stdio();
 

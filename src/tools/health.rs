@@ -4,10 +4,11 @@
 //
 // Returns a JSON object:
 //   {
-//     "status":         "ok" | "unhealthy",
-//     "pg_reachable":   bool,
-//     "pool_available": bool,
-//     "latency_ms":     f64,
+//     "status":                   "ok" | "unhealthy",
+//     "pg_reachable":             bool,
+//     "pool_available":           bool,
+//     "latency_ms":               f64,
+//     "schema_cache_age_seconds": u64,
 //     "pool_stats": {
 //       "size":      usize,
 //       "available": usize,
@@ -27,8 +28,8 @@ use crate::{error::McpError, server::context::ToolContext};
 /// Handle a `health` tool call.
 ///
 /// Acquires a connection from the pool, runs `SELECT 1`, and measures the
-/// end-to-end round-trip latency. Pool statistics are captured after the
-/// connection is released.
+/// end-to-end round-trip latency. Pool statistics and cache age are captured
+/// after the connection is released.
 ///
 /// # Errors
 ///
@@ -57,14 +58,18 @@ pub async fn handle(
     // Capture pool stats after the connection is released.
     let pool_status = ctx.pool.inner().status();
 
+    // Capture cache age.
+    let cache_age_seconds = ctx.cache.age_seconds().await;
+
     let pool_available = pg_reachable;
     let status = if pg_reachable { "ok" } else { "unhealthy" };
 
     let body = serde_json::json!({
-        "status":         status,
-        "pg_reachable":   pg_reachable,
-        "pool_available": pool_available,
-        "latency_ms":     latency_ms,
+        "status":                   status,
+        "pg_reachable":             pg_reachable,
+        "pool_available":           pool_available,
+        "latency_ms":               latency_ms,
+        "schema_cache_age_seconds": cache_age_seconds,
         "pool_stats": {
             "size":      pool_status.size,
             "available": pool_status.available,

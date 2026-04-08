@@ -2,6 +2,9 @@
 //
 // table_stats tool — returns runtime statistics for a user table.
 //
+// Cache-first: looks up stats from SchemaCache when populated; falls back to
+// a live pg_catalog query when the cache has no entry for the requested table.
+//
 // Parameters:
 //   table  (string, required)  — table name
 //   schema (string, optional)  — schema name; defaults to "public"
@@ -45,7 +48,7 @@ use std::time::Duration;
 use rmcp::model::{CallToolResult, Content};
 use serde_json::{Map, Value};
 
-use crate::{error::McpError, server::context::ToolContext};
+use crate::{error::McpError, pg::cache::CachedTableStats, server::context::ToolContext};
 
 /// Format an `Option<time::OffsetDateTime>` as an RFC 3339 string, or return
 /// `Value::Null` when the timestamp is absent.
@@ -67,6 +70,55 @@ fn format_timestamp(ts: Option<time::OffsetDateTime>) -> Result<Value, McpError>
             Ok(Value::String(s))
         }
     }
+}
+
+/// Build the JSON response body from a [`CachedTableStats`] entry.
+///
+/// Used by both the cache-hit path and (if needed) as a shared builder.
+fn build_stats_json(stats: &CachedTableStats) -> Result<Value, McpError> {
+    // Timestamps in the cache are already formatted as Option<String> (RFC 3339).
+    let last_vacuum = stats
+        .last_vacuum
+        .as_deref()
+        .map(|s| Value::String(s.to_string()))
+        .unwrap_or(Value::Null);
+    let last_autovacuum = stats
+        .last_autovacuum
+        .as_deref()
+        .map(|s| Value::String(s.to_string()))
+        .unwrap_or(Value::Null);
+    let last_analyze = stats
+        .last_analyze
+        .as_deref()
+        .map(|s| Value::String(s.to_string()))
+        .unwrap_or(Value::Null);
+    let last_autoanalyze = stats
+        .last_autoanalyze
+        .as_deref()
+        .map(|s| Value::String(s.to_string()))
+        .unwrap_or(Value::Null);
+
+    Ok(serde_json::json!({
+        "table":  stats.table,
+        "schema": stats.schema,
+        "row_estimate": stats.row_estimate,
+        "sizes": {
+            "total":   stats.total_bytes,
+            "table":   stats.table_bytes,
+            "indexes": stats.index_bytes,
+            "toast":   stats.toast_bytes,
+        },
+        "cache_hit_ratio":             stats.cache_hit_ratio,
+        "seq_scans":                   stats.seq_scans,
+        "idx_scans":                   stats.idx_scans,
+        "live_tuples":                 stats.live_tuples,
+        "dead_tuples":                 stats.dead_tuples,
+        "last_vacuum":                 last_vacuum,
+        "last_autovacuum":             last_autovacuum,
+        "last_analyze":                last_analyze,
+        "last_autoanalyze":            last_autoanalyze,
+        "modifications_since_analyze": stats.modifications_since_analyze,
+    }))
 }
 
 /// Extract and validate the `table` and `schema` parameters from `args`.
@@ -96,9 +148,11 @@ fn extract_params(args: Option<&Map<String, Value>>) -> Result<(String, String),
 
 /// Handle a `table_stats` tool call.
 ///
-/// Acquires a connection and executes a single query against `pg_stat_user_tables`,
-/// `pg_class`, and `pg_statio_user_tables` to gather size and activity metrics
-/// for the requested table. Zero rows → [`McpError::table_not_found`].
+/// Checks the schema cache first for a matching stats entry. On a cache hit,
+/// returns cached data without acquiring a connection. On a cache miss,
+/// acquires a connection and executes a single query against
+/// `pg_stat_user_tables`, `pg_class`, and `pg_statio_user_tables`.
+/// Zero rows → [`McpError::table_not_found`].
 ///
 /// # Parameters
 ///
@@ -116,6 +170,18 @@ pub async fn handle(
     args: Option<Map<String, Value>>,
 ) -> Result<CallToolResult, McpError> {
     let (table, schema) = extract_params(args.as_ref())?;
+
+    // Cache-first: look up stats from snapshot.
+    if let Some(stats) = ctx.cache.get_table_stats(&schema, &table).await {
+        tracing::debug!(schema = %schema, table = %table, "table_stats: cache hit");
+        let body = build_stats_json(&stats)?;
+        return Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&body).map_err(|e| McpError::internal(e.to_string()))?,
+        )]));
+    }
+
+    // Cache miss: fall through to live query.
+    tracing::debug!(schema = %schema, table = %table, "table_stats: cache miss, querying pg_catalog");
 
     let timeout = Duration::from_secs(ctx.config.pool.acquire_timeout_seconds);
     let client = ctx.pool.get(timeout).await?;

@@ -2,6 +2,9 @@
 //
 // list_extensions tool — returns all extensions installed in the current database.
 //
+// Cache-first: reads from SchemaCache when populated; falls back to a live
+// pg_catalog query when the cache is empty.
+//
 // Parameters: none.
 //
 // Queries pg_extension joined with pg_namespace for the schema, and LEFT JOINs
@@ -33,19 +36,43 @@ use crate::{error::McpError, server::context::ToolContext};
 
 /// Handle a `list_extensions` tool call.
 ///
-/// Acquires a connection, queries `pg_extension` joined with `pg_namespace` and
-/// `pg_available_extensions`, and returns all installed extensions with their
-/// version, schema, and description.
+/// Checks the schema cache first. On a cache hit (non-empty result), returns
+/// cached data without acquiring a connection. On a cache miss, acquires a
+/// connection, queries `pg_extension` joined with `pg_namespace` and
+/// `pg_available_extensions`, and returns all installed extensions.
 ///
 /// # Errors
 ///
 /// Returns [`McpError::pg_pool_timeout`] if a connection cannot be acquired
-/// within the configured timeout, or [`McpError::pg_query_failed`] if the
-/// catalog query fails.
+/// within the configured timeout (fallback path only), or
+/// [`McpError::pg_query_failed`] if the catalog query fails.
 pub async fn handle(
     ctx: ToolContext,
     _args: Option<Map<String, Value>>,
 ) -> Result<CallToolResult, McpError> {
+    // Cache-first: read extensions from snapshot.
+    let cached = ctx.cache.get_extensions().await;
+    if !cached.is_empty() {
+        tracing::debug!(count = cached.len(), "list_extensions: cache hit");
+        let extensions: Vec<Value> = cached
+            .into_iter()
+            .map(|e| {
+                serde_json::json!({
+                    "name":        e.name,
+                    "version":     e.version,
+                    "schema":      e.schema,
+                    "description": e.description,
+                })
+            })
+            .collect();
+        let body = serde_json::json!({ "extensions": extensions });
+        return Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&body).map_err(|e| McpError::internal(e.to_string()))?,
+        )]));
+    }
+
+    // Cache miss: fall through to live query.
+    tracing::debug!("list_extensions: cache miss, querying pg_catalog");
     let timeout = Duration::from_secs(ctx.config.pool.acquire_timeout_seconds);
     let client = ctx.pool.get(timeout).await?;
 

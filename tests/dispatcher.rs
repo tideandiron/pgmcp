@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use pgmcp::{
     config::{CacheConfig, Config, GuardrailConfig, PoolConfig, TelemetryConfig, TransportConfig},
-    pg::pool::Pool,
+    pg::{cache::SchemaCache, pool::Pool},
     server::PgMcpServer,
 };
 use rmcp::service::RunningService;
@@ -41,7 +41,8 @@ fn test_config(database_url: &str) -> Config {
 /// Helper: create a connected server and client over an in-process channel.
 async fn connect(pool: Arc<Pool>, config: Arc<Config>) -> RunningService<RoleClient, ()> {
     let (server_io, client_io) = tokio::io::duplex(65_536);
-    let handler = PgMcpServer::new(pool, config);
+    let cache = Arc::new(SchemaCache::empty());
+    let handler = PgMcpServer::new(pool, cache, config);
     tokio::spawn(async move {
         if let Ok(running) = handler.serve(server_io).await {
             let _ = running.waiting().await;

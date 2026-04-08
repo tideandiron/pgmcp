@@ -17,7 +17,7 @@ use std::{sync::Arc, time::Duration};
 
 use pgmcp::{
     config::{CacheConfig, Config, GuardrailConfig, PoolConfig, TelemetryConfig, TransportConfig},
-    pg::pool::Pool,
+    pg::{cache::SchemaCache, pool::Pool},
     server::context::ToolContext,
     tools::{connection_info, health},
 };
@@ -41,7 +41,8 @@ fn test_ctx(url: &str) -> ToolContext {
         guardrails: GuardrailConfig::default(),
     });
     let pool = Arc::new(Pool::build(&config).expect("pool build"));
-    ToolContext::new(pool, config)
+    let cache = Arc::new(SchemaCache::empty());
+    ToolContext::new(pool, cache, config)
 }
 
 /// Build a minimal [`Config`] pointing at the given database URL.
@@ -230,6 +231,7 @@ async fn test_health_response_has_all_fields() {
         "pg_reachable",
         "pool_available",
         "latency_ms",
+        "schema_cache_age_seconds",
         "pool_stats",
     ] {
         assert!(v.get(field).is_some(), "missing field: {field}");

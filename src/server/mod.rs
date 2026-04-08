@@ -29,25 +29,33 @@ use rmcp::{
     service::{MaybeSendFuture, RequestContext},
 };
 
-use crate::{config::Config, pg::pool::Pool};
+use crate::{
+    config::Config,
+    pg::{cache::SchemaCache, pool::Pool},
+};
 
 use self::context::ToolContext;
 
 /// The pgmcp MCP server handler.
 ///
-/// Holds shared references to the connection pool and application config.
-/// Implements `rmcp::ServerHandler` to process MCP protocol requests.
-/// Clone is cheap — both fields are Arc-wrapped.
+/// Holds shared references to the connection pool, schema cache, and
+/// application config. Implements `rmcp::ServerHandler` to process MCP
+/// protocol requests. Clone is cheap — all fields are Arc-wrapped.
 #[derive(Clone)]
 pub struct PgMcpServer {
     pool: Arc<Pool>,
+    cache: Arc<SchemaCache>,
     config: Arc<Config>,
 }
 
 impl PgMcpServer {
     /// Create a new server handler.
-    pub fn new(pool: Arc<Pool>, config: Arc<Config>) -> Self {
-        Self { pool, config }
+    pub fn new(pool: Arc<Pool>, cache: Arc<SchemaCache>, config: Arc<Config>) -> Self {
+        Self {
+            pool,
+            cache,
+            config,
+        }
     }
 }
 
@@ -86,7 +94,11 @@ impl ServerHandler for PgMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + MaybeSendFuture + '_
     {
-        let ctx = ToolContext::new(Arc::clone(&self.pool), Arc::clone(&self.config));
+        let ctx = ToolContext::new(
+            Arc::clone(&self.pool),
+            Arc::clone(&self.cache),
+            Arc::clone(&self.config),
+        );
         async move {
             router::dispatch(ctx, request).await.or_else(|mcp_err| {
                 // Convert McpError to CallToolResult::error so the protocol

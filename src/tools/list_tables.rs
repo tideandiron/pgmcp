@@ -2,6 +2,9 @@
 //
 // list_tables tool — returns tables, views, and materialized views in a schema.
 //
+// Cache-first: reads from SchemaCache when populated; falls back to a live
+// pg_catalog query when the cache returns no results.
+//
 // Parameters:
 //   schema (string, required)  — schema name; missing or empty → param_invalid
 //   kind   (string, optional)  — "table" | "view" | "materialized_view" | "all"
@@ -57,11 +60,24 @@ fn kind_to_relkind_sql(kind: &str) -> Result<&'static str, McpError> {
     }
 }
 
+/// Map a user-facing kind string to a slice of cache kind strings for filtering.
+///
+/// Returns a slice reference suitable for passing to `SchemaCache::get_tables`.
+fn kind_to_cache_kinds(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "table" => &["table"],
+        "view" => &["view"],
+        "materialized_view" => &["materialized_view"],
+        _ => &[], // "all" or anything else → no filter
+    }
+}
+
 /// Handle a `list_tables` tool call.
 ///
-/// Acquires a connection and queries `pg_class` joined with `pg_namespace` and
-/// `pg_description`. Returns tables, views, and materialized views in the
-/// requested schema, filtered by the connected role's `SELECT` privilege.
+/// Checks the schema cache first. On a cache hit (non-empty result for the
+/// requested schema and kind), returns cached data without acquiring a
+/// connection. On a cache miss, acquires a connection and queries `pg_class`
+/// directly.
 ///
 /// Child partition tables (`relispartition = true`) are excluded — only
 /// partition parents and regular tables are returned.
@@ -97,11 +113,39 @@ pub async fn handle(
         .and_then(|v| v.as_str())
         .unwrap_or("table");
 
-    // Inline the relkind filter as SQL literals — pg_class.relkind is type "char"
-    // (a single-byte internal type), not TEXT.  Bind parameters cannot be coerced
-    // to "char"[] from Vec<String>, so we embed the allowlist values directly.
-    // The values are from our own controlled allowlist; there is no injection risk.
+    // Validate the kind string eagerly — errors before cache lookup.
     let relkind_sql = kind_to_relkind_sql(kind_str)?;
+    let cache_kinds = kind_to_cache_kinds(kind_str);
+
+    // Cache-first: read tables from snapshot.
+    let cached = ctx.cache.get_tables(&schema, cache_kinds).await;
+    if !cached.is_empty() {
+        tracing::debug!(
+            schema = %schema,
+            kind = kind_str,
+            count = cached.len(),
+            "list_tables: cache hit"
+        );
+        let tables: Vec<Value> = cached
+            .into_iter()
+            .map(|t| {
+                serde_json::json!({
+                    "schema":       t.schema,
+                    "name":         t.name,
+                    "kind":         t.kind,
+                    "row_estimate": t.row_estimate,
+                    "description":  t.description,
+                })
+            })
+            .collect();
+        let body = serde_json::json!({ "tables": tables });
+        return Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&body).map_err(|e| McpError::internal(e.to_string()))?,
+        )]));
+    }
+
+    // Cache miss: fall through to live query.
+    tracing::debug!(schema = %schema, kind = kind_str, "list_tables: cache miss, querying pg_catalog");
 
     let timeout = Duration::from_secs(ctx.config.pool.acquire_timeout_seconds);
     let client = ctx.pool.get(timeout).await?;

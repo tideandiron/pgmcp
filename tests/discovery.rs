@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use pgmcp::{
     config::{CacheConfig, Config, GuardrailConfig, PoolConfig, TelemetryConfig, TransportConfig},
-    pg::pool::Pool,
+    pg::{cache::SchemaCache, pool::Pool},
     server::context::ToolContext,
     tools::{
         describe_table, list_databases, list_enums, list_extensions, list_schemas, list_tables,
@@ -42,7 +42,8 @@ fn test_config(database_url: &str) -> Config {
 fn test_ctx(url: &str) -> ToolContext {
     let config = Arc::new(test_config(url));
     let pool = Arc::new(Pool::build(&config).expect("pool build"));
-    ToolContext::new(pool, config)
+    let cache = Arc::new(SchemaCache::empty());
+    ToolContext::new(pool, cache, config)
 }
 
 // ── server_info ───────────────────────────────────────────────────────────────

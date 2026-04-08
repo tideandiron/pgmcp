@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use pgmcp::{
     config::{CacheConfig, Config, GuardrailConfig, PoolConfig, TelemetryConfig, TransportConfig},
-    pg::pool::Pool,
+    pg::{cache::SchemaCache, pool::Pool},
     server::PgMcpServer,
 };
 use rmcp::{
@@ -46,7 +46,8 @@ async fn connect(pool: Arc<Pool>, config: Arc<Config>) -> RunningService<RoleCli
 
     // Start the server in a background task. The server owns one half of the
     // duplex pipe. It terminates when the client side is dropped.
-    let handler = PgMcpServer::new(pool, config);
+    let cache = Arc::new(SchemaCache::empty());
+    let handler = PgMcpServer::new(pool, cache, config);
     tokio::spawn(async move {
         if let Ok(running) = handler.serve(server_io).await {
             let _ = running.waiting().await;
