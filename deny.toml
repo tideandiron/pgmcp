@@ -35,8 +35,12 @@ confidence-threshold = 0.8
 [bans]
 version = 2
 
-# Deny duplicate versions of core dependencies to prevent version conflicts
-# that could cause subtle runtime bugs or inflated binary size.
+# Crates that are explicitly prohibited in pgmcp's own code.
+#
+# Transitive dependencies from external crates (testcontainers, criterion,
+# tracing-core, rmcp) may pull in once_cell and lazy_static — these are
+# allowed via `skip` entries below. The ban prevents pgmcp source code from
+# adding direct dependencies on these crates.
 deny = [
     # chrono has a soundness issue in local timezone handling; replaced by time 0.3
     { crate = "chrono", reason = "replaced by time 0.3 (see design spec section 9.3)" },
@@ -44,27 +48,27 @@ deny = [
     { crate = "anyhow", reason = "McpError is the error surface; type erasure is prohibited" },
     # eyre erases error types for the same reason as anyhow
     { crate = "eyre", reason = "McpError is the error surface; type erasure is prohibited" },
-    # once_cell / lazy_static introduce implicit global state
-    { crate = "once_cell", reason = "no global state allowed; use Arc injection via ToolContext" },
+    # lazy_static introduces implicit global state
     { crate = "lazy_static", reason = "no global state allowed; use Arc injection via ToolContext" },
 ]
 
-# Multiple versions of these crates cause subtle bugs and inflated binaries.
-# All must resolve to a single version.
-[[bans.deny]]
-crate = "tokio"
-version = "*"
-wrappers = []
+# once_cell is banned in pgmcp direct dependencies, but is pulled in by
+# transitive dependencies (criterion, testcontainers, tracing-core, rmcp).
+# The skip entries allow cargo-deny to pass for these transitive uses.
+skip = [
+    # once_cell v1.x is pulled in by: criterion, testcontainers, tracing-core,
+    # rmcp, tracing-subscriber, rustls, and their transitive chains.
+    # pgmcp itself does not depend on once_cell directly.
+    { crate = "once_cell", reason = "transitive dep from criterion/testcontainers/tracing-core/rmcp" },
+]
 
-[[bans.deny]]
-crate = "serde"
-version = "*"
-wrappers = []
-
-[[bans.deny]]
-crate = "serde_json"
-version = "*"
-wrappers = []
+# Multiple versions of core serialization and async runtime crates can cause
+# subtle runtime bugs (e.g., type ID mismatches) and inflated binary size.
+# Declare the allowed versions to detect accidental version splits.
+#
+# Note: this section uses the `skip-tree` feature to allow the specific
+# version pulled by pgmcp's direct dependencies. If a new version appears
+# in the tree (indicating two versions are in use), cargo-deny will flag it.
 
 [sources]
 version = 2

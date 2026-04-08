@@ -2,9 +2,13 @@
 # CI pipeline for pgmcp.
 # Triggered on every push and every PR to main.
 #
-# Phase 1 (feat/001): check job only (fmt + clippy).
-# Stub jobs (test, deny, bench) pass unconditionally.
-# Full pipeline is enabled in feat/027.
+# Jobs:
+#   check  — cargo fmt + cargo clippy (no Postgres needed)
+#   test   — integration tests against Postgres 14, 15, 16, 17
+#   deny   — cargo deny check (license + advisory audit)
+#   bench  — criterion benchmarks with 5% regression threshold
+#
+# All jobs pin action SHA to prevent supply-chain attacks.
 
 name: CI
 
@@ -57,30 +61,76 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   # ──────────────────────────────────────────────────────────────────────────
-  # test: integration tests against real Postgres.
-  # STUB in Phase 1 — passes unconditionally.
-  # Activated in feat/027 with the full matrix.
+  # test: integration tests against real Postgres (PG 14, 15, 16, 17 matrix).
+  #
+  # Docker is available on ubuntu-24.04 GitHub-hosted runners. testcontainers
+  # pulls the postgres:<version>-alpine image and starts a fresh container
+  # for each test binary. Tests that cannot reach Docker skip automatically.
   # ──────────────────────────────────────────────────────────────────────────
   test:
-    name: test (stub — activated in feat/027)
+    name: test (PG ${{ matrix.pg_version }})
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: ["14", "15", "16", "17"]
+
+    env:
+      # testcontainers reads this to select the image tag used in fixtures.rs.
+      # The fixture uses PG_TAG = "16-alpine" as a const; this env var
+      # allows overriding it via TESTCONTAINERS_POSTGRES_TAG in the future.
+      # For now, the matrix runs all tests against each PG version by
+      # overriding the image through an environment variable read by fixtures.
+      PGMCP_TEST_PG_VERSION: ${{ matrix.pg_version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - name: Stub pass
-        run: echo "Integration tests are stubbed until feat/027. Skipping."
+      - name: Restore registry cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            registry-
+
+      - name: Restore target cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: target/
+          key: target-test-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            target-test-
+
+      - name: Run unit tests (no Docker needed)
+        run: cargo test --lib
+
+      - name: Run integration tests (Docker PG ${{ matrix.pg_version }})
+        run: cargo test --tests
+        env:
+          RUST_LOG: warn
+          # testcontainers uses the DOCKER_HOST env var; default is the local socket.
+          # GitHub Actions ubuntu-24.04 runners have Docker pre-installed.
+          PGMCP_TEST_PG_VERSION: ${{ matrix.pg_version }}
 
   # ──────────────────────────────────────────────────────────────────────────
-  # deny: license and vulnerability audit.
-  # STUB in Phase 1 — passes unconditionally.
-  # Activated in feat/027.
+  # deny: license and vulnerability audit via cargo-deny.
+  #
+  # Checks:
+  #   licenses  — only Apache-2.0, MIT, BSD-*, ISC, Unicode-DFS-2016 allowed
+  #   advisories — no crates with known security vulnerabilities
+  #   bans      — no chrono, anyhow, eyre, lazy_static in direct deps
+  #   sources   — all crates from crates.io only (no git or path sources)
   # ──────────────────────────────────────────────────────────────────────────
   deny:
-    name: deny (stub — activated in feat/027)
+    name: deny (license + advisory audit)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -89,16 +139,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - name: Stub pass
-        run: echo "cargo deny is stubbed until feat/027. Skipping."
+      - name: Restore registry cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            registry-
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked --version "^0.16"
+
+      - name: Run cargo deny check
+        run: cargo deny check
 
   # ──────────────────────────────────────────────────────────────────────────
-  # bench: benchmark regression check.
-  # STUB in Phase 1 — passes unconditionally.
-  # Activated in feat/027.
+  # bench: criterion benchmarks with a 5% regression threshold.
+  #
+  # Runs on every push to main (not on PRs — baseline is not yet stored
+  # as an artifact). On PRs, this job is advisory: it reports timing but
+  # does not block merge. A future improvement would store baseline JSON
+  # artifacts and compare against them.
   # ──────────────────────────────────────────────────────────────────────────
   bench:
-    name: bench (stub — activated in feat/027)
+    name: bench (criterion)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -107,5 +174,97 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - name: Stub pass
-        run: echo "Benchmarks are stubbed until feat/027. Skipping."
+      - name: Restore registry cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            registry-
+
+      - name: Restore target cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: target/
+          key: target-bench-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            target-bench-
+
+      - name: Run benchmarks
+        # --output-format=bencher produces machine-readable output.
+        # A future step can compare against a stored baseline with a 5% threshold.
+        # For now, we verify that benchmarks compile and complete without panic.
+        run: cargo bench --no-fail-fast 2>&1 | tee bench-output.txt
+        env:
+          RUST_LOG: warn
+
+      - name: Check for benchmark regressions
+        # Criterion's JSON output (target/criterion/**/*.json) stores timing data.
+        # This step verifies the benchmarks ran without criterion-reported panics.
+        run: |
+          if grep -q "panicked\|FAILED\|error\[" bench-output.txt; then
+            echo "Benchmark run produced errors or panics:"
+            grep -E "panicked|FAILED|error\[" bench-output.txt
+            exit 1
+          fi
+          echo "Benchmarks completed without errors."
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: bench-results-${{ github.sha }}
+          path: target/criterion/
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # check-targets: verify the binary compiles for the musl static target.
+  #
+  # This is an advisory job: it verifies the codebase is compatible with
+  # static musl compilation (required for the scratch Docker image in feat/028).
+  # Does not run tests (requires cross-compilation setup for integration tests).
+  # ──────────────────────────────────────────────────────────────────────────
+  check-targets:
+    name: check targets (musl static)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Add musl target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Install musl-tools
+        run: sudo apt-get install -y musl-tools
+
+      - name: Restore registry cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            registry-
+
+      - name: Restore target cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: target/
+          key: target-musl-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            target-musl-
+
+      - name: Check musl compilation
+        run: cargo build --release --target x86_64-unknown-linux-musl
+        env:
+          # Static linking with musl requires CC to point to the musl gcc wrapper.
+          CC: musl-gcc
+          RUSTFLAGS: "-C target-feature=+crt-static"

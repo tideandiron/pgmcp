@@ -2,12 +2,20 @@
 //
 // PostgreSQL container fixture for integration tests.
 //
-// Uses testcontainers GenericImage with the official postgres:16-alpine image.
-// The container is started once per call; testcontainers handles cleanup on drop.
+// Uses testcontainers GenericImage with the official postgres:<version>-alpine
+// image. The container is started once per call; testcontainers handles cleanup
+// on drop.
 //
 // When Docker is not available, `pg_container` returns `None`. Integration
-// tests that require a live container should call `require_pg_container()` and
-// return early if Docker is unavailable, marking the test as skipped.
+// tests that require a live container should call `pg_container()` and return
+// early if Docker is unavailable, marking the test as skipped.
+//
+// # PG version matrix
+//
+// The CI matrix sets `PGMCP_TEST_PG_VERSION` to one of: 14, 15, 16, 17.
+// When the env var is set, `pg_container()` uses that tag instead of the
+// default (16-alpine). This enables running the full test suite against
+// all supported Postgres versions from the same test binary.
 
 use testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
@@ -18,11 +26,22 @@ use testcontainers::{
 /// Docker image name used for the PostgreSQL container in integration tests.
 pub const PG_IMAGE: &str = "postgres";
 
-/// Docker image tag — `16-alpine` is a small, well-tested official image.
-pub const PG_TAG: &str = "16-alpine";
+/// Default Docker image tag — `16-alpine` is a small, well-tested official image.
+pub const PG_DEFAULT_TAG: &str = "16-alpine";
 
 /// Port Postgres listens on inside the container.
 pub const PG_PORT: u16 = 5432;
+
+/// Resolve the Postgres image tag to use for this test run.
+///
+/// When `PGMCP_TEST_PG_VERSION` is set (e.g., "14", "15", "16", "17"),
+/// the tag is `<version>-alpine`. Otherwise, uses [`PG_DEFAULT_TAG`].
+pub fn pg_image_tag() -> String {
+    match std::env::var("PGMCP_TEST_PG_VERSION") {
+        Ok(v) if !v.is_empty() => format!("{v}-alpine"),
+        _ => PG_DEFAULT_TAG.to_string(),
+    }
+}
 
 /// Attempt to start a fresh PostgreSQL container.
 ///
@@ -35,9 +54,11 @@ pub const PG_PORT: u16 = 5432;
 /// Panics if Docker is reachable but the container fails to start for any
 /// other reason (e.g., image pull failure, out-of-memory).
 pub async fn pg_container() -> Option<(ContainerAsync<GenericImage>, String)> {
+    let tag = pg_image_tag();
+
     // Attempt to start the container. A `SocketNotFoundError` means Docker is
     // not running on this host; treat that as a skip condition, not a failure.
-    let result = GenericImage::new(PG_IMAGE, PG_TAG)
+    let result = GenericImage::new(PG_IMAGE, &tag)
         .with_exposed_port(PG_PORT.tcp())
         .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
@@ -60,7 +81,7 @@ pub async fn pg_container() -> Option<(ContainerAsync<GenericImage>, String)> {
                 // Docker is not available on this host — skip.
                 return None;
             }
-            panic!("PostgreSQL container failed to start: {e}");
+            panic!("PostgreSQL container failed to start (tag: {tag}): {e}");
         }
     };
 
