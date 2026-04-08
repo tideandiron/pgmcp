@@ -201,6 +201,11 @@ pub async fn handle(
 /// The column type varies: on some PG versions it is TEXT, on others it may be
 /// decoded as a `serde_json::Value` directly via the with-serde_json-1 feature.
 /// We try both approaches.
+/// Public alias used by `suggest_index` to reuse the same extraction logic.
+pub fn extract_plan_json_from_rows(rows: &[tokio_postgres::Row]) -> Result<Value, McpError> {
+    extract_plan_json(rows)
+}
+
 fn extract_plan_json(rows: &[tokio_postgres::Row]) -> Result<Value, McpError> {
     let row = rows
         .first()
