@@ -47,24 +47,7 @@ deny = [
     { crate = "eyre", reason = "McpError is the error surface; type erasure is prohibited" },
 ]
 
-# Crates that pgmcp does not use directly but are pulled in transitively.
-# These skip entries allow cargo-deny to pass without blocking transitive uses.
-#
-# Policy: pgmcp source code must not add direct dependencies on these crates.
-# The skip entries are documentation of known transitive usage, not permission
-# for pgmcp to use them directly.
-skip = [
-    # once_cell v1.x is pulled in by: criterion, testcontainers, tracing-core,
-    # rmcp, tracing-subscriber, rustls, and their transitive chains.
-    # pgmcp itself does not depend on once_cell directly.
-    { crate = "once_cell", reason = "transitive dep from criterion/testcontainers/tracing-core/rmcp" },
-    # chrono is pulled in transitively by rmcp, schemars, and serde_with.
-    # pgmcp itself uses time 0.3 as the direct dep (see design spec section 9.3).
-    { crate = "chrono", reason = "transitive dep from rmcp/schemars/serde_with; pgmcp uses time 0.3 directly" },
-    # lazy_static is pulled in transitively by deadpool and tracing-subscriber.
-    # pgmcp itself does not use lazy_static; all state is injected via ToolContext.
-    { crate = "lazy_static", reason = "transitive dep from deadpool/tracing-subscriber" },
-]
+skip = []
 
 # Multiple versions of core serialization and async runtime crates can cause
 # subtle runtime bugs (e.g., type ID mismatches) and inflated binary size.

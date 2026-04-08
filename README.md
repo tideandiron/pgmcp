@@ -3,7 +3,7 @@
 A Rust MCP server for PostgreSQL. Zero-overhead agent access to Postgres.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](rust-toolchain.toml)
+[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](rust-toolchain.toml)
 [![CI](https://github.com/tideandiron/pgmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/tideandiron/pgmcp/actions/workflows/ci.yml)
 
 ## What is this?
@@ -41,7 +41,7 @@ See the [MVP design specification](docs/specs/2026-04-07-pgmcp-mvp-design.md) fo
 
 ### Prerequisites
 
-- Rust 1.85 or later (see [`rust-toolchain.toml`](rust-toolchain.toml))
+- Rust 1.88 or later (see [`rust-toolchain.toml`](rust-toolchain.toml))
 - PostgreSQL 14–17
 - A Postgres connection string
 

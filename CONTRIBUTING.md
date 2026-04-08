@@ -8,7 +8,7 @@ project scope. All contributions follow this development workflow.
 
 ### Prerequisites
 
-- **Rust 1.85+** — `rustup update stable`; the `rust-toolchain.toml` file pins the channel
+- **Rust 1.88+** — `rustup update stable`; the `rust-toolchain.toml` file pins the channel
 - **Docker** — required for integration tests (testcontainers pulls postgres images)
 - **cargo clippy** and **cargo fmt** — included with the Rust toolchain
 

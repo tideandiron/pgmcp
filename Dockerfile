@@ -23,7 +23,7 @@
 #   docker run --rm pgmcp:latest --help
 
 # ── Stage 1: builder ──────────────────────────────────────────────────────────
-FROM rust:1.85-alpine AS builder
+FROM rust:1.88-alpine AS builder
 
 # Install musl-tools for static linking and OpenSSL for any TLS dependencies.
 # The pgmcp binary uses NoTls by default (tokio-postgres NoTls), so OpenSSL

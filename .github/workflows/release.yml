@@ -1,0 +1,96 @@
+#
+# Release workflow for pgmcp.
+# Triggered on push of a v* tag (e.g. v0.1.0).
+#
+# Jobs:
+#   release — builds a static x86_64-unknown-linux-musl binary, extracts the
+#             CHANGELOG section for the tagged version, and creates a GitHub
+#             Release with the binary as a release asset.
+#
+# All actions are pinned by SHA to prevent supply-chain attacks.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# No default permissions granted. Each job declares the minimum it needs.
+permissions: {}
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # release: build static musl binary and publish a GitHub Release.
+  # ──────────────────────────────────────────────────────────────────────────
+  release:
+    name: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Add musl target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Install musl-tools
+        run: sudo apt-get install -y musl-tools
+
+      - name: Restore registry cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            registry-
+
+      - name: Restore target cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: target/
+          key: target-musl-release-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            target-musl-release-
+            target-musl-
+
+      - name: Build static binary
+        run: cargo build --release --target x86_64-unknown-linux-musl
+        env:
+          CC: musl-gcc
+          RUSTFLAGS: "-C target-feature=+crt-static"
+
+      - name: Rename binary for upload
+        run: |
+          cp target/x86_64-unknown-linux-musl/release/pgmcp \
+             pgmcp-x86_64-unknown-linux-musl
+
+      - name: Extract CHANGELOG section
+        id: changelog
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          # Extract the section for the tagged version from CHANGELOG.md.
+          # The tag is e.g. v0.1.0; the CHANGELOG header is ## [0.1.0].
+          VERSION="${TAG_NAME#v}"
+          # Grab everything between the matching ## [VERSION] header and the
+          # next ## [ header (exclusive), then strip leading/trailing blank lines.
+          NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md \
+                  | sed -e '/./,$!d' -e 's/[[:space:]]*$//')
+          if [ -z "$NOTES" ]; then
+            NOTES="Release ${TAG_NAME}"
+          fi
+          # Write to a file to avoid quoting issues with multiline strings.
+          printf '%s\n' "$NOTES" > release-notes.txt
+          echo "notes_file=release-notes.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe  # v2.6.1
+        with:
+          body_path: ${{ steps.changelog.outputs.notes_file }}
+          files: pgmcp-x86_64-unknown-linux-musl
