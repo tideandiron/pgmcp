@@ -55,7 +55,7 @@ serde_json = "1"
 sqlparser = "0.61"
 
 # Date/time handling (replaces chrono — see design spec section 9.3)
-time = { version = "0.3", features = ["serde"] }
+time = { version = "0.3", features = ["serde", "formatting"] }
 
 # Structured logging and span instrumentation
 tracing = "0.1"

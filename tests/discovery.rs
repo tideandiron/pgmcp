@@ -16,7 +16,10 @@ use pgmcp::{
     config::{CacheConfig, Config, GuardrailConfig, PoolConfig, TelemetryConfig, TransportConfig},
     pg::pool::Pool,
     server::context::ToolContext,
-    tools::{describe_table, list_databases, list_enums, list_schemas, list_tables, server_info},
+    tools::{
+        describe_table, list_databases, list_enums, list_extensions, list_schemas, list_tables,
+        server_info, table_stats,
+    },
 };
 use serde_json::Value;
 
@@ -1108,8 +1111,7 @@ async fn test_describe_table_table_level_check_constraint() {
             .expect("create dt_check_test");
     }
 
-    let args =
-        serde_json::from_str(r#"{"table":"dt_check_test","schema":"public"}"#).ok();
+    let args = serde_json::from_str(r#"{"table":"dt_check_test","schema":"public"}"#).ok();
     let result = describe_table::handle(test_ctx(&url), args)
         .await
         .expect("describe_table must succeed for dt_check_test");
@@ -1247,5 +1249,410 @@ async fn test_list_enums_empty_when_no_enums() {
     assert!(
         enums.is_empty(),
         "fresh database must have no user enums, got: {enums:?}"
+    );
+}
+
+// ── list_extensions tests ─────────────────────────────────────────────────────
+
+/// list_extensions returns an "extensions" array.
+#[tokio::test]
+async fn test_list_extensions_returns_array() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_extensions::handle(test_ctx(&url), None)
+        .await
+        .expect("list_extensions must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert!(
+        v["extensions"].is_array(),
+        "result must have an 'extensions' array"
+    );
+}
+
+/// plpgsql is always installed in Postgres — it must appear in the list.
+#[tokio::test]
+async fn test_list_extensions_includes_plpgsql() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_extensions::handle(test_ctx(&url), None)
+        .await
+        .expect("list_extensions must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let extensions = v["extensions"].as_array().unwrap();
+
+    let found = extensions.iter().any(|e| e["name"] == "plpgsql");
+    assert!(
+        found,
+        "plpgsql must be present in list_extensions output; got: {extensions:?}"
+    );
+}
+
+/// Every extension entry has the required string fields.
+#[tokio::test]
+async fn test_list_extensions_entries_have_required_fields() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_extensions::handle(test_ctx(&url), None)
+        .await
+        .expect("list_extensions must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let extensions = v["extensions"].as_array().unwrap();
+
+    assert!(!extensions.is_empty(), "must have at least one extension");
+    for ext in extensions {
+        for field in &["name", "version", "schema", "description"] {
+            assert!(
+                ext[field].is_string(),
+                "extension.{field} must be a string, got: {:?}",
+                ext.get(*field)
+            );
+        }
+        // name and version must be non-empty.
+        assert!(
+            !ext["name"].as_str().unwrap().is_empty(),
+            "extension.name must not be empty"
+        );
+        assert!(
+            !ext["version"].as_str().unwrap().is_empty(),
+            "extension.version must not be empty"
+        );
+    }
+}
+
+/// plpgsql entry has a non-empty name and version field.
+#[tokio::test]
+async fn test_list_extensions_plpgsql_has_name_and_version() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_extensions::handle(test_ctx(&url), None)
+        .await
+        .expect("list_extensions must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let extensions = v["extensions"].as_array().unwrap();
+
+    let plpgsql = extensions
+        .iter()
+        .find(|e| e["name"] == "plpgsql")
+        .expect("plpgsql must be present");
+
+    let name = plpgsql["name"].as_str().unwrap();
+    let version = plpgsql["version"].as_str().unwrap();
+    assert_eq!(name, "plpgsql");
+    assert!(!version.is_empty(), "plpgsql version must not be empty");
+}
+
+/// Extensions are returned in alphabetical order.
+#[tokio::test]
+async fn test_list_extensions_sorted_alphabetically() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_extensions::handle(test_ctx(&url), None)
+        .await
+        .expect("list_extensions must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let extensions = v["extensions"].as_array().unwrap();
+
+    let names: Vec<&str> = extensions
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        names, sorted,
+        "extensions must be returned in alphabetical order"
+    );
+}
+
+// ── table_stats tests ─────────────────────────────────────────────────────────
+
+/// Helper: create a stats test table and optionally insert rows + ANALYZE.
+async fn create_stats_test_table(url: &str, table: &str, insert_rows: bool) {
+    use tokio_postgres::NoTls;
+    let (client, conn) = tokio_postgres::connect(url, NoTls)
+        .await
+        .expect("direct connect for table_stats fixture");
+    tokio::spawn(conn);
+
+    client
+        .execute(
+            &format!(
+                "CREATE TABLE IF NOT EXISTS public.{table} \
+                 (id serial PRIMARY KEY, val text, created_at timestamptz DEFAULT now())"
+            ),
+            &[],
+        )
+        .await
+        .expect("create stats test table");
+
+    if insert_rows {
+        // Insert 100 rows so statistics are non-trivial.
+        for i in 0i32..100 {
+            client
+                .execute(
+                    &format!("INSERT INTO public.{table} (val) VALUES ($1)"),
+                    &[&format!("row_{i}")],
+                )
+                .await
+                .expect("insert row");
+        }
+        // ANALYZE so pg_stat_user_tables reflects the inserted rows.
+        client
+            .execute(&format!("ANALYZE public.{table}"), &[])
+            .await
+            .expect("ANALYZE stats test table");
+    }
+}
+
+/// table_stats returns the required top-level keys.
+#[tokio::test]
+async fn test_table_stats_returns_required_keys() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_stats_test_table(&url, "ts_required_keys", false).await;
+
+    let args = serde_json::from_str(r#"{"table":"ts_required_keys","schema":"public"}"#).ok();
+    let result = table_stats::handle(test_ctx(&url), args)
+        .await
+        .expect("table_stats must succeed for ts_required_keys");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    for key in &[
+        "table",
+        "schema",
+        "row_estimate",
+        "sizes",
+        "cache_hit_ratio",
+        "seq_scans",
+        "idx_scans",
+        "live_tuples",
+        "dead_tuples",
+        "last_vacuum",
+        "last_autovacuum",
+        "last_analyze",
+        "last_autoanalyze",
+        "modifications_since_analyze",
+    ] {
+        assert!(v.get(*key).is_some(), "missing top-level key: {key}");
+    }
+}
+
+/// table_stats sizes sub-object has four non-negative integer fields.
+#[tokio::test]
+async fn test_table_stats_sizes_are_non_negative() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_stats_test_table(&url, "ts_sizes", false).await;
+
+    let args = serde_json::from_str(r#"{"table":"ts_sizes","schema":"public"}"#).ok();
+    let result = table_stats::handle(test_ctx(&url), args)
+        .await
+        .expect("table_stats must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let sizes = v["sizes"].as_object().expect("sizes must be an object");
+
+    for key in &["total", "table", "indexes", "toast"] {
+        let val = sizes[*key]
+            .as_i64()
+            .unwrap_or_else(|| panic!("sizes.{key} must be an integer"));
+        assert!(val >= 0, "sizes.{key} must be non-negative, got {val}");
+    }
+    // total must be >= table size (toast and indexes add to total).
+    let total = sizes["total"].as_i64().unwrap();
+    let table_sz = sizes["table"].as_i64().unwrap();
+    assert!(
+        total >= table_sz,
+        "total size {total} must be >= table size {table_sz}"
+    );
+}
+
+/// table_stats after inserting 100 rows and running ANALYZE shows non-zero
+/// live_tuples. (pg_stat_user_tables is updated by ANALYZE.)
+#[tokio::test]
+async fn test_table_stats_live_tuples_after_insert_and_analyze() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_stats_test_table(&url, "ts_live_tuples", true).await;
+
+    let args = serde_json::from_str(r#"{"table":"ts_live_tuples","schema":"public"}"#).ok();
+    let result = table_stats::handle(test_ctx(&url), args)
+        .await
+        .expect("table_stats must succeed for ts_live_tuples");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    let live = v["live_tuples"]
+        .as_i64()
+        .expect("live_tuples must be an integer");
+    assert!(
+        live > 0,
+        "live_tuples must be > 0 after inserting 100 rows and running ANALYZE, got {live}"
+    );
+}
+
+/// table_stats for a nonexistent table returns table_not_found.
+#[tokio::test]
+async fn test_table_stats_nonexistent_table_returns_table_not_found() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let args =
+        serde_json::from_str(r#"{"table":"this_table_does_not_exist_xyzzy","schema":"public"}"#)
+            .ok();
+    let result = table_stats::handle(test_ctx(&url), args).await;
+    assert!(result.is_err(), "nonexistent table must return an error");
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.code(),
+        "table_not_found",
+        "error code must be table_not_found, got: {}",
+        err.code()
+    );
+}
+
+/// table_stats with no `table` parameter returns param_invalid.
+#[tokio::test]
+async fn test_table_stats_missing_table_param() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = table_stats::handle(test_ctx(&url), None).await;
+    assert!(result.is_err(), "missing table must return an error");
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.code(),
+        "param_invalid",
+        "error code must be param_invalid"
+    );
+}
+
+/// table_stats schema defaults to "public" when omitted.
+#[tokio::test]
+async fn test_table_stats_schema_defaults_to_public() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_stats_test_table(&url, "ts_default_schema", false).await;
+
+    let args = serde_json::from_str(r#"{"table":"ts_default_schema"}"#).ok();
+    let result = table_stats::handle(test_ctx(&url), args)
+        .await
+        .expect("table_stats must succeed when schema is omitted");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["schema"], "public", "schema must default to 'public'");
+    assert_eq!(v["table"], "ts_default_schema");
+}
+
+/// table_stats cache_hit_ratio is a float between 0.0 and 1.0.
+#[tokio::test]
+async fn test_table_stats_cache_hit_ratio_in_range() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_stats_test_table(&url, "ts_cache_ratio", false).await;
+
+    let args = serde_json::from_str(r#"{"table":"ts_cache_ratio","schema":"public"}"#).ok();
+    let result = table_stats::handle(test_ctx(&url), args)
+        .await
+        .expect("table_stats must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    let ratio = v["cache_hit_ratio"]
+        .as_f64()
+        .expect("cache_hit_ratio must be a float");
+    assert!(
+        (0.0..=1.0).contains(&ratio),
+        "cache_hit_ratio must be between 0.0 and 1.0, got {ratio}"
+    );
+}
+
+/// table_stats timestamp fields are null or valid RFC 3339 strings.
+#[tokio::test]
+async fn test_table_stats_timestamp_fields_are_null_or_rfc3339() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_stats_test_table(&url, "ts_timestamps", false).await;
+
+    let args = serde_json::from_str(r#"{"table":"ts_timestamps","schema":"public"}"#).ok();
+    let result = table_stats::handle(test_ctx(&url), args)
+        .await
+        .expect("table_stats must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    for field in &[
+        "last_vacuum",
+        "last_autovacuum",
+        "last_analyze",
+        "last_autoanalyze",
+    ] {
+        let val = &v[field];
+        assert!(
+            val.is_null() || val.is_string(),
+            "{field} must be null or a string, got: {val:?}"
+        );
+        if let Some(s) = val.as_str() {
+            // A basic RFC 3339 sanity check: must contain 'T' date-time separator.
+            assert!(
+                s.contains('T'),
+                "{field} string '{s}' does not look like an RFC 3339 timestamp"
+            );
+        }
+    }
+}
+
+/// table_stats last_analyze is non-null after running ANALYZE.
+#[tokio::test]
+async fn test_table_stats_last_analyze_set_after_analyze() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    // create_stats_test_table with insert_rows=true runs ANALYZE.
+    create_stats_test_table(&url, "ts_last_analyze", true).await;
+
+    let args = serde_json::from_str(r#"{"table":"ts_last_analyze","schema":"public"}"#).ok();
+    let result = table_stats::handle(test_ctx(&url), args)
+        .await
+        .expect("table_stats must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    // After an explicit ANALYZE, last_analyze must be a non-null string.
+    assert!(
+        v["last_analyze"].is_string(),
+        "last_analyze must be non-null after ANALYZE, got: {:?}",
+        v["last_analyze"]
     );
 }
