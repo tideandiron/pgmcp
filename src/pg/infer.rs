@@ -89,32 +89,34 @@ pub fn infer_column_description(col_name: &str, col_type: &str) -> Option<String
 
     // ── Category 2: Foreign key conventions ──────────────────────────────────
 
-    if let Some(prefix) = name.strip_suffix("_id") {
-        if !prefix.is_empty() && is_int {
-            let table = pluralize_guess(prefix);
-            return Some(format!("Foreign key reference to the {table} table"));
-        }
+    if let Some(prefix) = name.strip_suffix("_id")
+        && !prefix.is_empty()
+        && is_int
+    {
+        let table = pluralize_guess(prefix);
+        return Some(format!("Foreign key reference to the {table} table"));
     }
-    if let Some(prefix) = name.strip_suffix("_uuid") {
-        if !prefix.is_empty() && (is_uuid || is_text) {
-            let table = pluralize_guess(prefix);
-            return Some(format!("UUID foreign key reference to the {table} table"));
-        }
+    if let Some(prefix) = name.strip_suffix("_uuid")
+        && !prefix.is_empty()
+        && (is_uuid || is_text)
+    {
+        let table = pluralize_guess(prefix);
+        return Some(format!("UUID foreign key reference to the {table} table"));
     }
-    if let Some(prefix) = name.strip_suffix("_fk") {
-        if !prefix.is_empty() {
-            let table = pluralize_guess(prefix);
-            return Some(format!("Foreign key reference to the {table} table"));
-        }
+    if let Some(prefix) = name.strip_suffix("_fk")
+        && !prefix.is_empty()
+    {
+        let table = pluralize_guess(prefix);
+        return Some(format!("Foreign key reference to the {table} table"));
     }
     // Plural *_ids → array of FK references
-    if let Some(prefix) = name.strip_suffix("_ids") {
-        if !prefix.is_empty() {
-            let table = pluralize_guess(prefix);
-            return Some(format!(
-                "Array of foreign key references to the {table} table"
-            ));
-        }
+    if let Some(prefix) = name.strip_suffix("_ids")
+        && !prefix.is_empty()
+    {
+        let table = pluralize_guess(prefix);
+        return Some(format!(
+            "Array of foreign key references to the {table} table"
+        ));
     }
 
     // ── Category 3: Timestamps ────────────────────────────────────────────────
@@ -165,18 +167,20 @@ pub fn infer_column_description(col_name: &str, col_type: &str) -> Option<String
         return Some("Date of birth".to_string());
     }
     // Generic *_at timestamp
-    if let Some(prefix) = name.strip_suffix("_at") {
-        if !prefix.is_empty() && is_timestamp {
-            let event = prefix.replace('_', " ");
-            return Some(format!("Timestamp of the {event} event"));
-        }
+    if let Some(prefix) = name.strip_suffix("_at")
+        && !prefix.is_empty()
+        && is_timestamp
+    {
+        let event = prefix.replace('_', " ");
+        return Some(format!("Timestamp of the {event} event"));
     }
     // Generic *_on timestamp
-    if let Some(prefix) = name.strip_suffix("_on") {
-        if !prefix.is_empty() && is_timestamp {
-            let event = prefix.replace('_', " ");
-            return Some(format!("Date or timestamp of the {event} event"));
-        }
+    if let Some(prefix) = name.strip_suffix("_on")
+        && !prefix.is_empty()
+        && is_timestamp
+    {
+        let event = prefix.replace('_', " ");
+        return Some(format!("Date or timestamp of the {event} event"));
     }
     if name == "timestamp" || name == "ts" {
         return Some("Event timestamp".to_string());

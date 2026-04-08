@@ -145,21 +145,21 @@ fn apply_limit(query: &mut Query, default_limit: u32, max_limit: u32) -> bool {
 
         Some(LimitClause::OffsetCommaLimit { limit, .. }) => {
             // MySQL-style `LIMIT offset, limit`. Extract and cap.
-            if let Expr::Value(vs) = limit {
-                if let Some(n) = extract_u64_from_value(&vs.value) {
-                    let capped = n.min(u64::from(max_limit));
-                    if capped != n {
-                        let span = vs.span;
-                        if let Some(LimitClause::OffsetCommaLimit {
-                            limit: Expr::Value(ref mut vw),
-                            ..
-                        }) = query.limit_clause
-                        {
-                            *vw = ValueWithSpan {
-                                value: Value::Number(capped.to_string(), false),
-                                span,
-                            };
-                        }
+            if let Expr::Value(vs) = limit
+                && let Some(n) = extract_u64_from_value(&vs.value)
+            {
+                let capped = n.min(u64::from(max_limit));
+                if capped != n {
+                    let span = vs.span;
+                    if let Some(LimitClause::OffsetCommaLimit {
+                        limit: Expr::Value(ref mut vw),
+                        ..
+                    }) = query.limit_clause
+                    {
+                        *vw = ValueWithSpan {
+                            value: Value::Number(capped.to_string(), false),
+                            span,
+                        };
                     }
                 }
             }

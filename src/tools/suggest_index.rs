@@ -221,12 +221,11 @@ pub(crate) struct SeqScanCandidate {
 /// This function is pure (no I/O) and is separated for unit testability.
 pub(crate) fn collect_seq_scan_candidates(plan_json: &Value) -> Vec<SeqScanCandidate> {
     let mut candidates = Vec::new();
-    if let Some(arr) = plan_json.as_array() {
-        if let Some(first) = arr.first() {
-            if let Some(plan) = first.get("Plan") {
-                walk_for_seq_scans(plan, &mut candidates);
-            }
-        }
+    if let Some(arr) = plan_json.as_array()
+        && let Some(first) = arr.first()
+        && let Some(plan) = first.get("Plan")
+    {
+        walk_for_seq_scans(plan, &mut candidates);
     }
     candidates
 }
@@ -309,11 +308,11 @@ fn extract_last_identifier(s: &str) -> String {
     }
 
     // Handle double-quoted identifier.
-    if let Some(inner) = s.strip_suffix('"') {
-        if let Some(start) = inner.rfind('"') {
-            let ident = &inner[start + 1..];
-            return ident.to_string();
-        }
+    if let Some(inner) = s.strip_suffix('"')
+        && let Some(start) = inner.rfind('"')
+    {
+        let ident = &inner[start + 1..];
+        return ident.to_string();
     }
 
     // Bare identifier: walk back from the end collecting word chars.

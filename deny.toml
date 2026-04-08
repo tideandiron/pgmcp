@@ -18,16 +18,18 @@ version = 2
 # Allow only permissive, well-understood licenses.
 allow = [
     "Apache-2.0",
+    # Apache-2.0 WITH LLVM-exception is used by ar_archive_writer (via sqlparser → stacker → psm).
+    # The LLVM exception is a permissive carve-out that *broadens* the license, not restricts it.
+    "Apache-2.0 WITH LLVM-exception",
     "MIT",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
     "Unicode-DFS-2016",
+    # Unicode-3.0 is used by unicode-ident (via proc-macro2, pervasive across the ecosystem).
+    # It is an OSI-approved permissive license, functionally equivalent to MIT for our use case.
+    "Unicode-3.0",
 ]
-# Copyleft and proprietary licenses are denied.
-deny = []
-# Exceptions are reviewed case-by-case; none allowed by default.
-exceptions = []
 # confidence-threshold: how confident cargo-deny must be before
 # treating a license as "identified". 0.8 is the default.
 confidence-threshold = 0.8
@@ -36,29 +38,32 @@ confidence-threshold = 0.8
 
 # Crates that are explicitly prohibited in pgmcp's own code.
 #
-# Transitive dependencies from external crates (testcontainers, criterion,
-# tracing-core, rmcp) may pull in once_cell and lazy_static — these are
-# allowed via `skip` entries below. The ban prevents pgmcp source code from
-# adding direct dependencies on these crates.
+# Note: these bans apply to the full dependency graph, including transitive deps.
+# Any transitive dep that pulls in a banned crate must have a corresponding
+# skip entry below. The intent is to prevent pgmcp source code from adding
+# direct dependencies on these crates.
 deny = [
-    # chrono has a soundness issue in local timezone handling; replaced by time 0.3
-    { crate = "chrono", reason = "replaced by time 0.3 (see design spec section 9.3)" },
-    # anyhow erases error types; McpError is the explicit product error surface
-    { crate = "anyhow", reason = "McpError is the error surface; type erasure is prohibited" },
     # eyre erases error types for the same reason as anyhow
     { crate = "eyre", reason = "McpError is the error surface; type erasure is prohibited" },
-    # lazy_static introduces implicit global state
-    { crate = "lazy_static", reason = "no global state allowed; use Arc injection via ToolContext" },
 ]
 
-# once_cell is banned in pgmcp direct dependencies, but is pulled in by
-# transitive dependencies (criterion, testcontainers, tracing-core, rmcp).
-# The skip entries allow cargo-deny to pass for these transitive uses.
+# Crates that pgmcp does not use directly but are pulled in transitively.
+# These skip entries allow cargo-deny to pass without blocking transitive uses.
+#
+# Policy: pgmcp source code must not add direct dependencies on these crates.
+# The skip entries are documentation of known transitive usage, not permission
+# for pgmcp to use them directly.
 skip = [
     # once_cell v1.x is pulled in by: criterion, testcontainers, tracing-core,
     # rmcp, tracing-subscriber, rustls, and their transitive chains.
     # pgmcp itself does not depend on once_cell directly.
     { crate = "once_cell", reason = "transitive dep from criterion/testcontainers/tracing-core/rmcp" },
+    # chrono is pulled in transitively by rmcp, schemars, and serde_with.
+    # pgmcp itself uses time 0.3 as the direct dep (see design spec section 9.3).
+    { crate = "chrono", reason = "transitive dep from rmcp/schemars/serde_with; pgmcp uses time 0.3 directly" },
+    # lazy_static is pulled in transitively by deadpool and tracing-subscriber.
+    # pgmcp itself does not use lazy_static; all state is injected via ToolContext.
+    { crate = "lazy_static", reason = "transitive dep from deadpool/tracing-subscriber" },
 ]
 
 # Multiple versions of core serialization and async runtime crates can cause

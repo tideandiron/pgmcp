@@ -151,7 +151,7 @@ jobs:
             registry-
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked --version "^0.16"
+        run: cargo install cargo-deny --locked --version "^0.19"
 
       - name: Run cargo deny check
         run: cargo deny check

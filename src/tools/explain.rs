@@ -244,12 +244,11 @@ fn extract_plan_text(rows: &[tokio_postgres::Row]) -> Option<String> {
 /// Used when `analyze=true` to avoid running the statement a second time.
 fn synthesize_plan_text(plan_json: &Value) -> String {
     let mut lines = Vec::new();
-    if let Some(arr) = plan_json.as_array() {
-        if let Some(first) = arr.first() {
-            if let Some(plan) = first.get("Plan") {
-                append_node_text(plan, 0, &mut lines);
-            }
-        }
+    if let Some(arr) = plan_json.as_array()
+        && let Some(first) = arr.first()
+        && let Some(plan) = first.get("Plan")
+    {
+        append_node_text(plan, 0, &mut lines);
     }
     lines.join("\n")
 }
@@ -486,13 +485,13 @@ fn apply_node_rules(node: &Value, node_type: &str, analysis: &mut PlanAnalysis) 
     }
 
     // ── Rule 16: Temp file usage ──────────────────────────────────────────────
-    if let Some(temp_written) = node.get("Temp Written Blocks").and_then(|v| v.as_i64()) {
-        if temp_written > 0 {
-            analysis.warnings.push(format!(
-                "Temp file usage detected ({temp_written} blocks written). \
-                 Increase work_mem to reduce temp file I/O."
-            ));
-        }
+    if let Some(temp_written) = node.get("Temp Written Blocks").and_then(|v| v.as_i64())
+        && temp_written > 0
+    {
+        analysis.warnings.push(format!(
+            "Temp file usage detected ({temp_written} blocks written). \
+             Increase work_mem to reduce temp file I/O."
+        ));
     }
 
     // ── Rule 23: Stale statistics (row estimate = 1 on non-trivial node) ─────

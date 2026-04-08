@@ -2,7 +2,7 @@
 name = "pgmcp"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "A Rust MCP server for PostgreSQL — zero-overhead agent access to Postgres"
 license = "Apache-2.0"
 repository = "https://github.com/tideandiron/pgmcp"

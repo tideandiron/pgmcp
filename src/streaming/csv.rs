@@ -155,21 +155,21 @@ fn encode_csv_value(row: &Row, i: usize, oid: u32, buf: &mut Vec<u8>) {
         }
 
         OID_FLOAT4 => {
-            if let Ok(Some(v)) = row.try_get::<_, Option<f32>>(i) {
-                if v.is_finite() {
-                    let mut tmp = ryu::Buffer::new();
-                    buf.extend_from_slice(tmp.format(v).as_bytes());
-                }
-                // NaN/Inf → empty field
+            if let Ok(Some(v)) = row.try_get::<_, Option<f32>>(i)
+                && v.is_finite()
+            {
+                let mut tmp = ryu::Buffer::new();
+                buf.extend_from_slice(tmp.format(v).as_bytes());
             }
+            // NaN/Inf → empty field
         }
 
         OID_FLOAT8 => {
-            if let Ok(Some(v)) = row.try_get::<_, Option<f64>>(i) {
-                if v.is_finite() {
-                    let mut tmp = ryu::Buffer::new();
-                    buf.extend_from_slice(tmp.format(v).as_bytes());
-                }
+            if let Ok(Some(v)) = row.try_get::<_, Option<f64>>(i)
+                && v.is_finite()
+            {
+                let mut tmp = ryu::Buffer::new();
+                buf.extend_from_slice(tmp.format(v).as_bytes());
             }
         }
 
@@ -193,10 +193,10 @@ fn encode_csv_value(row: &Row, i: usize, oid: u32, buf: &mut Vec<u8>) {
         }
 
         OID_TIMESTAMPTZ => {
-            if let Ok(Some(dt)) = row.try_get::<_, Option<time::OffsetDateTime>>(i) {
-                if let Ok(s) = dt.format(&time::format_description::well_known::Rfc3339) {
-                    write_csv_field(&s, buf);
-                }
+            if let Ok(Some(dt)) = row.try_get::<_, Option<time::OffsetDateTime>>(i)
+                && let Ok(s) = dt.format(&time::format_description::well_known::Rfc3339)
+            {
+                write_csv_field(&s, buf);
             }
         }
 

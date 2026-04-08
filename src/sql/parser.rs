@@ -337,12 +337,11 @@ fn count_params(sql: &str) -> usize {
             while end < bytes.len() && bytes[end].is_ascii_digit() {
                 end += 1;
             }
-            if end > start {
-                if let Ok(n) = sql[start..end].parse::<usize>() {
-                    if n > max_n {
-                        max_n = n;
-                    }
-                }
+            if end > start
+                && let Ok(n) = sql[start..end].parse::<usize>()
+                && n > max_n
+            {
+                max_n = n;
             }
             i = end;
         } else {
