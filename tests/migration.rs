@@ -100,7 +100,10 @@ async fn migration_pg_version_from_real_db() {
     assert_ne!(ver, "unknown", "pg_version should be detected from real DB");
     // CI matrix tests PG 14-17; default local image is postgres:16-alpine
     assert!(
-        ver.starts_with("17") || ver.starts_with("16") || ver.starts_with("15") || ver.starts_with("14"),
+        ver.starts_with("17")
+            || ver.starts_with("16")
+            || ver.starts_with("15")
+            || ver.starts_with("14"),
         "expected modern PG version, got: {ver}"
     );
 }
