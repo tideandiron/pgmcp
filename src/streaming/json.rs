@@ -3,7 +3,6 @@
 // JSON row encoder with OID-specific fast paths.
 // Items here are consumed by the query tool handler (feat/018).
 // Dead-code lint fires until the query tool integrates this layer.
-#![allow(dead_code)]
 //
 // Encodes tokio-postgres rows directly to JSON bytes without routing through
 // serde_json::Value (which requires heap allocation for every field). Each
@@ -109,40 +108,32 @@ impl JsonEncoder {
 /// Encode the value at column index `i` of `row` with the given OID.
 fn encode_value(row: &Row, i: usize, oid: u32, buf: &mut Vec<u8>) {
     match oid {
-        OID_BOOL => {
-            match row.try_get::<_, Option<bool>>(i) {
-                Ok(Some(v)) => buf.extend_from_slice(if v { b"true" } else { b"false" }),
-                Ok(None) => buf.extend_from_slice(b"null"),
-                Err(_) => buf.extend_from_slice(b"null"),
-            }
-        }
+        OID_BOOL => match row.try_get::<_, Option<bool>>(i) {
+            Ok(Some(v)) => buf.extend_from_slice(if v { b"true" } else { b"false" }),
+            Ok(None) => buf.extend_from_slice(b"null"),
+            Err(_) => buf.extend_from_slice(b"null"),
+        },
 
-        OID_INT2 => {
-            match row.try_get::<_, Option<i16>>(i) {
-                Ok(Some(v)) => {
-                    let _ = write!(buf, "{v}");
-                }
-                Ok(None) | Err(_) => buf.extend_from_slice(b"null"),
+        OID_INT2 => match row.try_get::<_, Option<i16>>(i) {
+            Ok(Some(v)) => {
+                let _ = write!(buf, "{v}");
             }
-        }
+            Ok(None) | Err(_) => buf.extend_from_slice(b"null"),
+        },
 
-        OID_INT4 => {
-            match row.try_get::<_, Option<i32>>(i) {
-                Ok(Some(v)) => {
-                    let _ = write!(buf, "{v}");
-                }
-                Ok(None) | Err(_) => buf.extend_from_slice(b"null"),
+        OID_INT4 => match row.try_get::<_, Option<i32>>(i) {
+            Ok(Some(v)) => {
+                let _ = write!(buf, "{v}");
             }
-        }
+            Ok(None) | Err(_) => buf.extend_from_slice(b"null"),
+        },
 
-        OID_INT8 => {
-            match row.try_get::<_, Option<i64>>(i) {
-                Ok(Some(v)) => {
-                    let _ = write!(buf, "{v}");
-                }
-                Ok(None) | Err(_) => buf.extend_from_slice(b"null"),
+        OID_INT8 => match row.try_get::<_, Option<i64>>(i) {
+            Ok(Some(v)) => {
+                let _ = write!(buf, "{v}");
             }
-        }
+            Ok(None) | Err(_) => buf.extend_from_slice(b"null"),
+        },
 
         OID_FLOAT4 => {
             match row.try_get::<_, Option<f32>>(i) {
@@ -153,8 +144,7 @@ fn encode_value(row: &Row, i: usize, oid: u32, buf: &mut Vec<u8>) {
                     } else if v.is_nan() {
                         buf.extend_from_slice(b"null"); // JSON has no NaN
                     } else if v.is_infinite() {
-                        buf.extend_from_slice(if v > 0.0 { b"null" } else { b"null" });
-                        // JSON has no ±Infinity; fall back to null
+                        buf.extend_from_slice(b"null"); // JSON has no ±Infinity; fall back to null
                     }
                 }
                 Ok(None) | Err(_) => buf.extend_from_slice(b"null"),

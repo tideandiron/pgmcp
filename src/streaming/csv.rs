@@ -131,9 +131,8 @@ impl CsvEncoder {
 fn encode_csv_value(row: &Row, i: usize, oid: u32, buf: &mut Vec<u8>) {
     match oid {
         OID_BOOL => {
-            match row.try_get::<_, Option<bool>>(i) {
-                Ok(Some(v)) => buf.extend_from_slice(if v { b"true" } else { b"false" }),
-                Ok(None) | Err(_) => {} // empty field
+            if let Ok(Some(v)) = row.try_get::<_, Option<bool>>(i) {
+                buf.extend_from_slice(if v { b"true" } else { b"false" });
             }
         }
 
@@ -313,7 +312,10 @@ mod tests {
             "JSON should be quoted: {result}"
         );
         // Double-quotes inside should be doubled.
-        assert!(result.contains(r#""""#), "inner quotes should be doubled: {result}");
+        assert!(
+            result.contains(r#""""#),
+            "inner quotes should be doubled: {result}"
+        );
     }
 
     #[test]
