@@ -33,9 +33,7 @@ pgmcp is a Rust MCP (Model Context Protocol) server for PostgreSQL. It is the fa
 
 **License:** Apache 2.0.
 
-**Go-to-market role:** pgmcp is the open-source GTM engine for the broader AgentDB cloud product. OSS users get a production-grade MCP server; AgentDB extends it with multi-tenancy, branching, and managed infrastructure.
-
-**MVP scope:** M1 (Core) + M2 (Schema + Intelligence). M3 (LISTEN/NOTIFY, cancel) and cloud-only features (search_schema, cross_query, branch_*) are explicitly out of scope.
+**MVP scope:** M1 (Core) + M2 (Schema + Intelligence). M3 features (LISTEN/NOTIFY, cancel) are out of scope for the initial release.
 
 ---
 
@@ -1335,7 +1333,7 @@ pgmcp executes SQL that the agent provides. It does not generate SQL from an obj
 pgmcp is a headless server. Its interface is the MCP protocol. Adding a web UI would add dependencies, attack surface, and maintenance burden for a use case (human direct interaction) that is explicitly not the target. Humans interacting with Postgres have pgAdmin, DBeaver, psql, and dozens of other tools.
 
 **No built-in auth for OSS.**
-pgmcp inherits the authentication model of Postgres: the connection string carries credentials, and Postgres enforces permissions. Adding a separate auth layer to pgmcp (API keys, OAuth, JWT) would duplicate what Postgres already does and create a second authentication surface to audit and maintain. OSS deployments are expected to be run in trusted environments (behind a firewall, in a private network, with network-level access control). The AgentDB cloud product handles multi-tenant authentication as a cloud concern.
+pgmcp inherits the authentication model of Postgres: the connection string carries credentials, and Postgres enforces permissions. Adding a separate auth layer to pgmcp (API keys, OAuth, JWT) would duplicate what Postgres already does and create a second authentication surface to audit and maintain. Deployments are expected to be run in trusted environments (behind a firewall, in a private network, with network-level access control).
 
 **No plugins, extensions, or middleware API.**
 pgmcp is not a platform. It does not have a plugin API, a hook system, or a middleware interface. Adding extension points would commit pgmcp to supporting a public API surface indefinitely, constrain future refactoring, and open the door to untested third-party code running in the pgmcp process. Features are added to pgmcp's core or they are not part of pgmcp. This is what makes the codebase auditable and the behavior predictable.

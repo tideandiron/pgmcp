@@ -27,3 +27,7 @@ docker/*.tar.gz
 # pgmcp runtime artifacts
 *.pid
 /pgmcp.toml
+
+# Business planning documents (not part of the open-source project)
+agentdb-product-plan.md
+pgmcp-engineering-scope.md
