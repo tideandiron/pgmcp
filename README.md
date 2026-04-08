@@ -17,24 +17,28 @@ pgmcp is Postgres-only by design. This is not a limitation — it is the entire 
 
 ## Status: What Works Today
 
-pgmcp is in **Phase 2 of 9** (M1 + M2 complete). The project compiles, the MCP protocol handshake works, and 15 tools are defined. Real tool implementations are landing branch by branch.
+pgmcp is in **Phase 3 of 9** complete. All 8 discovery tools are implemented and tested against real PostgreSQL. The remaining 7 tools (query, explain, suggest_index, propose_migration, my_permissions, and schema modification tools) are stubs being implemented next.
 
 | Category | Status |
 |----------|--------|
 | MCP protocol (stdio + SSE) | Working |
-| Connection pooling & PG version validation | Working |
-| Tool manifest (discovery by agents) | Working |
-| Tool implementations | Stubs returning "not yet implemented" |
+| Connection pooling & PG version validation (14-17) | Working |
+| Tool manifest (15 tools discoverable by agents) | Working |
+| Discovery tools (8/8) | **Implemented** |
+| SQL-accepting tools (0/4) | Stubs |
+| Introspection tools (2/3) | health + connection_info implemented, my_permissions stub |
+
+**159 tests** (84 unit + 75 integration against real PostgreSQL via testcontainers).
 
 See the [MVP design specification](docs/specs/2026-04-07-pgmcp-mvp-design.md) for the full roadmap and architectural details.
 
-### What's Coming
+### What's Coming Next
 
-- Real implementations of 15 tools (list_tables, describe_table, query with streaming, explain, suggest_index, propose_migration, etc.)
-- Schema cache with background invalidation
-- SQL guardrails (block dangerous queries)
-- Full row-streaming with adaptive batch sizing
-- Cross-platform binaries, Docker image
+- Schema cache with background invalidation (Phase 4)
+- SQL parser, guardrails, and LIMIT injection (Phase 5)
+- Query tool with full row-streaming and adaptive batching (Phase 6)
+- Intelligence tools: explain, suggest_index, propose_migration (Phase 7)
+- Cross-platform binaries, Docker image (Phase 9)
 
 ## Quick Start
 
@@ -99,35 +103,35 @@ pgmcp postgres://localhost/mydb
 
 ## Tools (MVP Surface)
 
-pgmcp exposes 15 tools across three categories. Tool handlers are currently stubs; implementations are in progress.
+pgmcp exposes 15 tools across three categories. 10 of 15 are implemented; the rest are stubs being built.
 
-### Discovery Tools
+### Discovery Tools (all implemented)
 
-These read from pg_catalog and serve results from the schema cache. They never execute caller-supplied SQL.
+These read from pg_catalog. They never execute caller-supplied SQL.
 
 - **`list_databases`** — list all databases on the Postgres instance
-- **`server_info`** — Postgres version, settings, and current role
-- **`list_schemas`** — all schemas in the current database
-- **`list_tables`** — tables, views, and materialized views in a schema
-- **`describe_table`** — full table definition: columns, types, constraints, indexes
-- **`list_enums`** — all enum types in a schema with their values
+- **`server_info`** — Postgres version, settings, extensions, and current role
+- **`list_schemas`** — all schemas in the current database (permission-filtered)
+- **`list_tables`** — tables, views, and materialized views in a schema (with kind filter)
+- **`describe_table`** — full table definition: columns, types, constraints, indexes, comments
+- **`list_enums`** — all enum types with their ordered values
 - **`list_extensions`** — installed extensions and versions
-- **`table_stats`** — runtime statistics from pg_stat_user_tables
+- **`table_stats`** — runtime statistics: sizes, scan counts, cache hit ratio, vacuum timestamps
 
-### SQL-Accepting Tools
+### SQL-Accepting Tools (stubs — Phase 5-7)
 
-All SQL-accepting tools pass queries through SQL analysis and guardrails before execution. Dangerous queries (DDL, COPY TO PROGRAM, session-modifying SET) are rejected before any connection is acquired.
+All SQL-accepting tools will pass queries through SQL analysis and guardrails before execution.
 
-- **`query`** — execute a SQL query; supports streaming results, multiple output formats, dry-run, transaction rollback, query explain
-- **`explain`** — run `EXPLAIN (ANALYZE, BUFFERS)` and return the query plan
-- **`suggest_index`** — analyze a query and propose indexes that would help
-- **`propose_migration`** — given an intent and context tables, propose migration SQL statements (CREATE TABLE, ALTER TABLE, CREATE INDEX, etc.)
+- **`query`** — execute SQL with streaming results, LIMIT injection, dry-run, intent declaration
+- **`explain`** — run `EXPLAIN (ANALYZE, BUFFERS)` and return the plan with plain-language analysis
+- **`suggest_index`** — analyze a query plan and propose indexes
+- **`propose_migration`** — analyze DDL SQL and return safety warnings, reverse SQL, impact assessment
 
-### Introspection Tools
+### Introspection Tools (2 of 3 implemented)
 
-- **`my_permissions`** — introspect the current role's privileges on schemas and tables
+- **`my_permissions`** — introspect the current role's privileges *(stub)*
 - **`connection_info`** — host, port, database, SSL status, pool stats
-- **`health`** — liveness check for orchestration (pool available, Postgres reachable)
+- **`health`** — liveness check with latency measurement and pool stats
 
 See the [MVP design specification, section 4](docs/specs/2026-04-07-pgmcp-mvp-design.md#4-mvp-tool-surface) for full parameter and return value documentation.
 
