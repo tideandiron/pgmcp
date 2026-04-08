@@ -187,10 +187,13 @@ mod tests {
         sizer.record(1_000, 500_000);
         let next = sizer.next_batch_size();
         assert!(
-            next >= MIN_BATCH_SIZE && next <= MAX_BATCH_SIZE,
+            (MIN_BATCH_SIZE..=MAX_BATCH_SIZE).contains(&next),
             "next_size {next} out of range"
         );
-        assert!(next < MAX_BATCH_SIZE, "sizer should adapt downward for large rows");
+        assert!(
+            next < MAX_BATCH_SIZE,
+            "sizer should adapt downward for large rows"
+        );
     }
 
     #[test]

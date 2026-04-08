@@ -67,7 +67,8 @@ async fn streaming_json_encodes_all_basic_types() {
     };
     let ctx = make_ctx(&url).await;
 
-    let sql = "SELECT 1::int2 AS i2, 42::int4 AS i4, 9999999::int8 AS i8, 1.5::float4 AS f4, 2.718::float8 AS f8, true AS b, 'hello'::text AS t";
+    // Avoid 2.718 (≈ e) and 3.14 (≈ π) to prevent clippy::approx_constant.
+    let sql = "SELECT 1::int2 AS i2, 42::int4 AS i4, 9999999::int8 AS i8, 1.5::float4 AS f4, 1.23::float8 AS f8, true AS b, 'hello'::text AS t";
 
     let result = query::handle(ctx, args(&format!(r#"{{"sql": "{sql}"}}"#)))
         .await
@@ -84,7 +85,7 @@ async fn streaming_json_encodes_all_basic_types() {
     assert_eq!(rows[0]["t"], "hello");
 
     let f8 = rows[0]["f8"].as_f64().unwrap();
-    assert!((f8 - 2.718).abs() < 0.001);
+    assert!((f8 - 1.23_f64).abs() < f64::EPSILON * 100.0);
 }
 
 #[tokio::test]

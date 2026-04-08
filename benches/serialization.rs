@@ -9,9 +9,9 @@
 //   cargo bench --bench serialization
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use pgmcp::streaming::json::write_json_string;
-use pgmcp::streaming::csv::write_csv_field;
 use pgmcp::streaming::BatchSizer;
+use pgmcp::streaming::csv::write_csv_field;
+use pgmcp::streaming::json::write_json_string;
 
 // ── Benchmark: write_json_string throughput ───────────────────────────────────
 
@@ -101,9 +101,7 @@ fn bench_json_encode_1000_rows_synthetic(c: &mut Criterion) {
     // Encode 1000 synthetic key-value pairs as JSON objects using the low-level
     // string writer. This approximates the throughput of the hot encoding path
     // for text-heavy result sets.
-    let values: Vec<String> = (0..1000)
-        .map(|i| format!("value_number_{i:05}"))
-        .collect();
+    let values: Vec<String> = (0..1000).map(|i| format!("value_number_{i:05}")).collect();
 
     c.bench_function("json_encode_1000_synthetic_text_rows", |b| {
         b.iter(|| {
@@ -132,9 +130,7 @@ fn bench_json_encode_1000_rows_synthetic(c: &mut Criterion) {
 }
 
 fn bench_csv_encode_1000_rows_synthetic(c: &mut Criterion) {
-    let values: Vec<String> = (0..1000)
-        .map(|i| format!("value_number_{i:05}"))
-        .collect();
+    let values: Vec<String> = (0..1000).map(|i| format!("value_number_{i:05}")).collect();
 
     c.bench_function("csv_encode_1000_synthetic_rows", |b| {
         b.iter(|| {

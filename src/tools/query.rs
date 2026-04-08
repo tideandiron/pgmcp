@@ -34,11 +34,7 @@ use crate::{
     pg::types::pg_type_name,
     server::context::ToolContext,
     sql::{guardrails::GuardrailConfig, limit::inject_limit, parser::StatementKind},
-    streaming::{
-        BatchSizer,
-        csv::CsvEncoder,
-        json::JsonEncoder,
-    },
+    streaming::{BatchSizer, csv::CsvEncoder, json::JsonEncoder},
     tools::query_events::{ColumnInfo, DryRunResponse, OutputFormat, QueryResponse},
 };
 
@@ -80,13 +76,13 @@ impl QueryParams {
     /// Returns [`McpError::param_invalid`] if `sql` is missing or empty, if
     /// `format` is unrecognized, or if `limit` is out of range.
     fn from_args(args: Option<&Map<String, serde_json::Value>>) -> Result<Self, McpError> {
-        let args = args.ok_or_else(|| McpError::param_invalid("sql", "sql parameter is required"))?;
+        let args =
+            args.ok_or_else(|| McpError::param_invalid("sql", "sql parameter is required"))?;
 
         // sql (required)
-        let sql = args
-            .get("sql")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| McpError::param_invalid("sql", "sql parameter is required and must be a string"))?;
+        let sql = args.get("sql").and_then(|v| v.as_str()).ok_or_else(|| {
+            McpError::param_invalid("sql", "sql parameter is required and must be a string")
+        })?;
         let sql = sql.trim().to_string();
         if sql.is_empty() {
             return Err(McpError::param_invalid("sql", "sql must not be empty"));
@@ -144,9 +140,9 @@ impl QueryParams {
         let format = match args.get("format") {
             None => OutputFormat::Json,
             Some(v) => {
-                let s = v.as_str().ok_or_else(|| {
-                    McpError::param_invalid("format", "format must be a string")
-                })?;
+                let s = v
+                    .as_str()
+                    .ok_or_else(|| McpError::param_invalid("format", "format must be a string"))?;
                 OutputFormat::from_str(s)?
             }
         };
@@ -227,19 +223,18 @@ pub async fn handle(
     let guardrail_result = crate::sql::guardrails::check(&parsed, &guardrail_config);
 
     // Step 4: For SELECT, inject LIMIT.
-    let (sql_after_limit, limit_injected) = if parsed.kind == StatementKind::Select
-        && guardrail_result.is_ok()
-    {
-        match inject_limit(&params.sql, params.limit, MAX_LIMIT) {
-            Ok(pair) => pair,
-            Err(e) => {
-                // parse error during limit injection — unexpected, but handle it
-                return Err(e);
+    let (sql_after_limit, limit_injected) =
+        if parsed.kind == StatementKind::Select && guardrail_result.is_ok() {
+            match inject_limit(&params.sql, params.limit, MAX_LIMIT) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    // parse error during limit injection — unexpected, but handle it
+                    return Err(e);
+                }
             }
-        }
-    } else {
-        (params.sql.clone(), false)
-    };
+        } else {
+            (params.sql.clone(), false)
+        };
 
     // Step 5: dry_run — return analysis without executing.
     if params.dry_run {
@@ -322,10 +317,14 @@ pub async fn handle(
     sizer.record(row_count, rows_bytes.len());
 
     // Step 14: Build and return the response.
+    // `truncated` is true when the result set hit the injected LIMIT exactly,
+    // indicating that more rows may exist beyond what was returned.
+    let truncated = limit_injected && row_count == params.limit as usize;
     let resp = QueryResponse {
         columns,
         rows_bytes,
         row_count,
+        truncated,
         format: params.format,
         sql_executed: sql_after_limit,
         limit_injected,

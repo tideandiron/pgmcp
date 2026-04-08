@@ -150,13 +150,13 @@ async fn migration_create_index_warns_and_suggests_concurrent() {
     assert!(
         warnings.iter().any(|w| w
             .as_str()
-            .map_or(false, |s| s.contains("ShareLock") || s.contains("writes"))),
+            .is_some_and(|s| s.contains("ShareLock") || s.contains("writes"))),
         "should warn about write blocking: {warnings:?}"
     );
     assert!(
         suggestions
             .iter()
-            .any(|s| s.as_str().map_or(false, |s| s.contains("CONCURRENTLY"))),
+            .any(|s| s.as_str().is_some_and(|s| s.contains("CONCURRENTLY"))),
         "should suggest CONCURRENTLY: {suggestions:?}"
     );
 }
