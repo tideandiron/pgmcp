@@ -1,10 +1,10 @@
 // src/tools/mod.rs
 pub mod connection_info;
-pub(crate) mod describe_table;
+pub mod describe_table;
 pub(crate) mod explain;
 pub mod health;
 pub mod list_databases;
-pub(crate) mod list_enums;
+pub mod list_enums;
 pub(crate) mod list_extensions;
 pub mod list_schemas;
 pub mod list_tables;

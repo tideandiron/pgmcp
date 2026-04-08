@@ -16,7 +16,7 @@ use pgmcp::{
     config::{CacheConfig, Config, GuardrailConfig, PoolConfig, TelemetryConfig, TransportConfig},
     pg::pool::Pool,
     server::context::ToolContext,
-    tools::{list_databases, list_schemas, list_tables, server_info},
+    tools::{describe_table, list_databases, list_enums, list_schemas, list_tables, server_info},
 };
 use serde_json::Value;
 
@@ -595,5 +595,657 @@ async fn test_list_tables_invalid_kind_is_param_invalid() {
         err.code(),
         "param_invalid",
         "error code must be param_invalid for invalid kind"
+    );
+}
+
+// ── describe_table + list_enums — fixture setup ───────────────────────────────
+
+/// Create the fixture schema, enum type, and tables used by describe_table
+/// and list_enums tests.
+///
+/// Idempotent — uses IF NOT EXISTS / CREATE OR REPLACE wherever possible.
+/// Must be called once per container; all tests share the same objects.
+async fn create_describe_table_fixtures(url: &str) {
+    use tokio_postgres::NoTls;
+    let (client, conn) = tokio_postgres::connect(url, NoTls)
+        .await
+        .expect("direct connect for DDL");
+    tokio::spawn(conn);
+
+    // Create the enum type used by list_enums tests.
+    client
+        .execute(
+            "DO $$ BEGIN \
+               IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'mood') THEN \
+                   CREATE TYPE public.mood AS ENUM ('happy', 'neutral', 'sad'); \
+               END IF; \
+             END $$",
+            &[],
+        )
+        .await
+        .expect("create enum mood");
+
+    // Parent table: has PK, a check constraint, a column comment, and a
+    // secondary unique index so every branch of describe_table is exercised.
+    client
+        .execute(
+            "CREATE TABLE IF NOT EXISTS public.dt_parent ( \
+               id      serial PRIMARY KEY, \
+               name    text NOT NULL, \
+               score   int  NOT NULL DEFAULT 0, \
+               status  public.mood NOT NULL DEFAULT 'neutral', \
+               CONSTRAINT dt_parent_score_check CHECK (score >= 0) \
+             )",
+            &[],
+        )
+        .await
+        .expect("create dt_parent");
+
+    // Add a secondary index on `name`.
+    client
+        .execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS dt_parent_name_idx \
+             ON public.dt_parent (name)",
+            &[],
+        )
+        .await
+        .expect("create dt_parent_name_idx");
+
+    // Attach a comment to the `name` column.
+    client
+        .execute(
+            "COMMENT ON COLUMN public.dt_parent.name IS 'The display name'",
+            &[],
+        )
+        .await
+        .expect("comment on column");
+
+    // Child table: has a FK back to dt_parent so foreign_key constraint appears.
+    client
+        .execute(
+            "CREATE TABLE IF NOT EXISTS public.dt_child ( \
+               id        serial PRIMARY KEY, \
+               parent_id int NOT NULL REFERENCES public.dt_parent(id) \
+             )",
+            &[],
+        )
+        .await
+        .expect("create dt_child");
+}
+
+// ── describe_table tests ──────────────────────────────────────────────────────
+
+/// describe_table returns the top-level structure with required keys.
+#[tokio::test]
+async fn test_describe_table_returns_required_top_level_keys() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed for dt_parent");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    for key in &["table", "columns", "constraints", "indexes"] {
+        assert!(v.get(*key).is_some(), "missing top-level key: {key}");
+    }
+}
+
+/// describe_table table sub-object has name, schema, and description fields.
+#[tokio::test]
+async fn test_describe_table_table_object_fields() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let tbl = &v["table"];
+
+    assert_eq!(tbl["name"], "dt_parent", "table.name must be 'dt_parent'");
+    assert_eq!(tbl["schema"], "public", "table.schema must be 'public'");
+    // description is null (no COMMENT ON TABLE set on dt_parent).
+    assert!(
+        tbl["description"].is_null() || tbl["description"].is_string(),
+        "table.description must be string or null"
+    );
+}
+
+/// describe_table returns columns with correct types.
+#[tokio::test]
+async fn test_describe_table_columns_correct_types() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let columns = v["columns"].as_array().expect("columns must be an array");
+
+    // Must have at least id, name, score, status.
+    assert!(columns.len() >= 4, "dt_parent must have at least 4 columns");
+
+    // Every column entry has the required fields.
+    for col in columns {
+        assert!(col["name"].is_string(), "column.name must be string");
+        assert!(col["type"].is_string(), "column.type must be string");
+        assert!(col["nullable"].is_boolean(), "column.nullable must be bool");
+        assert!(
+            col["default"].is_string() || col["default"].is_null(),
+            "column.default must be string or null"
+        );
+        assert!(
+            col["description"].is_string() || col["description"].is_null(),
+            "column.description must be string or null"
+        );
+    }
+
+    // `id` column should be integer type.
+    let id_col = columns
+        .iter()
+        .find(|c| c["name"] == "id")
+        .expect("id column");
+    let id_type = id_col["type"].as_str().unwrap();
+    assert!(
+        id_type.contains("integer") || id_type.contains("int"),
+        "id column type should contain 'integer', got: {id_type}"
+    );
+
+    // `name` column should be text and NOT NULL.
+    let name_col = columns
+        .iter()
+        .find(|c| c["name"] == "name")
+        .expect("name column");
+    assert_eq!(
+        name_col["type"], "text",
+        "name column must have type 'text'"
+    );
+    assert_eq!(name_col["nullable"], false, "name column must be NOT NULL");
+}
+
+/// describe_table columns include column comments.
+#[tokio::test]
+async fn test_describe_table_column_description() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let columns = v["columns"].as_array().unwrap();
+
+    let name_col = columns
+        .iter()
+        .find(|c| c["name"] == "name")
+        .expect("name column must exist");
+    let desc = name_col["description"]
+        .as_str()
+        .expect("name column must have a non-null description");
+    assert_eq!(
+        desc, "The display name",
+        "column description must match the COMMENT set on it"
+    );
+}
+
+/// describe_table returns the primary key constraint.
+#[tokio::test]
+async fn test_describe_table_primary_key_constraint() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let constraints = v["constraints"]
+        .as_array()
+        .expect("constraints must be an array");
+
+    let pk = constraints
+        .iter()
+        .find(|c| c["type"] == "primary_key")
+        .expect("dt_parent must have a primary_key constraint");
+
+    assert!(pk["name"].is_string(), "pk.name must be string");
+    assert!(pk["definition"].is_string(), "pk.definition must be string");
+
+    // PK columns must include 'id'.
+    let pk_cols = pk["columns"]
+        .as_array()
+        .expect("pk.columns must be an array");
+    let has_id = pk_cols.iter().any(|c| c == "id");
+    assert!(has_id, "primary key columns must include 'id'");
+}
+
+/// describe_table returns the check constraint on score.
+#[tokio::test]
+async fn test_describe_table_check_constraint() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let constraints = v["constraints"].as_array().unwrap();
+
+    let check = constraints
+        .iter()
+        .find(|c| c["type"] == "check")
+        .expect("dt_parent must have a check constraint");
+
+    let def = check["definition"].as_str().unwrap();
+    assert!(
+        def.contains("score") || def.to_lowercase().contains("check"),
+        "check constraint definition must reference 'score': got '{def}'"
+    );
+}
+
+/// describe_table returns foreign key constraint on dt_child.
+#[tokio::test]
+async fn test_describe_table_foreign_key_constraint() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_child","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed for dt_child");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let constraints = v["constraints"].as_array().unwrap();
+
+    let fk = constraints
+        .iter()
+        .find(|c| c["type"] == "foreign_key")
+        .expect("dt_child must have a foreign_key constraint");
+
+    let def = fk["definition"].as_str().unwrap();
+    assert!(
+        def.to_lowercase().contains("references") || def.to_lowercase().contains("foreign"),
+        "FK definition must contain 'REFERENCES': got '{def}'"
+    );
+    let fk_cols = fk["columns"].as_array().expect("fk.columns must be array");
+    let has_parent_id = fk_cols.iter().any(|c| c == "parent_id");
+    assert!(has_parent_id, "FK columns must include 'parent_id'");
+}
+
+/// describe_table returns indexes including primary and secondary.
+#[tokio::test]
+async fn test_describe_table_indexes() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let indexes = v["indexes"].as_array().expect("indexes must be an array");
+
+    // Must have at least two indexes: PK index and dt_parent_name_idx.
+    assert!(
+        indexes.len() >= 2,
+        "dt_parent must have at least 2 indexes, got {}",
+        indexes.len()
+    );
+
+    // Each index entry has required fields.
+    for idx in indexes {
+        assert!(idx["name"].is_string(), "index.name must be string");
+        assert!(idx["type"].is_string(), "index.type must be string");
+        assert!(
+            idx["is_unique"].is_boolean(),
+            "index.is_unique must be bool"
+        );
+        assert!(
+            idx["is_primary"].is_boolean(),
+            "index.is_primary must be bool"
+        );
+        assert!(
+            idx["definition"].is_string(),
+            "index.definition must be string"
+        );
+        assert!(
+            idx["size_bytes"].is_number(),
+            "index.size_bytes must be number"
+        );
+    }
+
+    // The primary index must be is_primary=true and is_unique=true.
+    let pk_idx = indexes
+        .iter()
+        .find(|i| i["is_primary"] == true)
+        .expect("must have a primary index");
+    assert_eq!(
+        pk_idx["is_unique"], true,
+        "primary index must also be unique"
+    );
+
+    // The secondary index on name must be present.
+    let has_name_idx = indexes.iter().any(|i| {
+        i["name"]
+            .as_str()
+            .map(|n| n.contains("name_idx"))
+            .unwrap_or(false)
+    });
+    assert!(has_name_idx, "dt_parent_name_idx must appear in indexes");
+}
+
+/// describe_table with no `table` parameter returns param_invalid.
+#[tokio::test]
+async fn test_describe_table_missing_table_param() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+
+    let result = describe_table::handle(test_ctx(&url), None).await;
+    assert!(result.is_err(), "missing table must return an error");
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.code(),
+        "param_invalid",
+        "error code must be param_invalid"
+    );
+}
+
+/// describe_table for a nonexistent table returns table_not_found.
+#[tokio::test]
+async fn test_describe_table_nonexistent_table() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+
+    let args =
+        serde_json::from_str(r#"{"table":"this_table_does_not_exist_xyz","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args).await;
+    assert!(result.is_err(), "nonexistent table must return an error");
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.code(),
+        "table_not_found",
+        "error code must be table_not_found, got: {}",
+        err.code()
+    );
+}
+
+/// describe_table schema defaults to "public" when omitted.
+#[tokio::test]
+async fn test_describe_table_schema_defaults_to_public() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    // Omit schema — should default to "public" and find dt_parent.
+    let args = serde_json::from_str(r#"{"table":"dt_parent"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed when schema is omitted");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        v["table"]["schema"], "public",
+        "schema must default to 'public'"
+    );
+    assert_eq!(v["table"]["name"], "dt_parent");
+}
+
+/// describe_table column default values are returned.
+#[tokio::test]
+async fn test_describe_table_column_defaults() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let args = serde_json::from_str(r#"{"table":"dt_parent","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let columns = v["columns"].as_array().unwrap();
+
+    // `score` has DEFAULT 0.
+    let score_col = columns
+        .iter()
+        .find(|c| c["name"] == "score")
+        .expect("score column must exist");
+    let default_val = score_col["default"]
+        .as_str()
+        .expect("score must have a default");
+    assert!(
+        default_val.contains('0'),
+        "score default must include '0', got: {default_val}"
+    );
+}
+
+/// describe_table returns a table-level check constraint with a non-null
+/// columns array rather than silently dropping the constraint.
+///
+/// A table-level CHECK like `CHECK (start_date < end_date)` is syntactically
+/// defined at the table level (not on a specific column). In Postgres, when
+/// such a constraint references columns, `conkey` is populated with those
+/// column numbers; when it references no columns at all, `conkey` is NULL.
+///
+/// The original INNER JOIN on `pg_attribute` used `attnum = ANY(conkey)` which
+/// evaluates to NULL when `conkey` IS NULL, causing the constraint row to be
+/// silently dropped. After switching to LEFT JOIN + FILTER the constraint must
+/// appear in the output regardless of whether `conkey` is NULL.
+///
+/// This test also exercises the non-NULL-conkey path (Postgres does populate
+/// `conkey` for checks that reference specific columns), verifying both that
+/// the constraint appears and that the `columns` field is a JSON array.
+#[tokio::test]
+async fn test_describe_table_table_level_check_constraint() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+
+    // Create the fixture table in this container (idempotent).
+    {
+        use tokio_postgres::NoTls;
+        let (client, conn) = tokio_postgres::connect(&url, NoTls)
+            .await
+            .expect("direct connect for DDL");
+        tokio::spawn(conn);
+        client
+            .execute(
+                "CREATE TABLE IF NOT EXISTS public.dt_check_test ( \
+                   start_date date, \
+                   end_date   date, \
+                   CONSTRAINT valid_range CHECK (start_date < end_date) \
+                 )",
+                &[],
+            )
+            .await
+            .expect("create dt_check_test");
+    }
+
+    let args =
+        serde_json::from_str(r#"{"table":"dt_check_test","schema":"public"}"#).ok();
+    let result = describe_table::handle(test_ctx(&url), args)
+        .await
+        .expect("describe_table must succeed for dt_check_test");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+
+    let constraints = v["constraints"]
+        .as_array()
+        .expect("constraints must be an array");
+
+    // The constraint must appear — it was silently dropped before the bug fix.
+    let valid_range = constraints
+        .iter()
+        .find(|c| c["name"] == "valid_range")
+        .expect("valid_range constraint must appear in describe_table output");
+
+    assert_eq!(
+        valid_range["type"], "check",
+        "valid_range must be type 'check'"
+    );
+
+    // The columns field must be a JSON array (never null), even for constraints
+    // whose conkey is NULL. build_constraint normalises Option<Vec<_>> to Vec<_>.
+    assert!(
+        valid_range["columns"].is_array(),
+        "valid_range.columns must be a JSON array, got: {:?}",
+        valid_range["columns"]
+    );
+
+    // Definition must reference the condition expression.
+    let def = valid_range["definition"]
+        .as_str()
+        .expect("valid_range.definition must be a string");
+    assert!(
+        def.contains("start_date") && def.contains("end_date"),
+        "definition must reference both columns: got '{def}'"
+    );
+}
+
+// ── list_enums tests ──────────────────────────────────────────────────────────
+
+/// list_enums returns an "enums" array.
+#[tokio::test]
+async fn test_list_enums_returns_array() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let result = list_enums::handle(test_ctx(&url), None)
+        .await
+        .expect("list_enums must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert!(v["enums"].is_array(), "result must have an 'enums' array");
+}
+
+/// list_enums returns the mood enum with correct labels in order.
+#[tokio::test]
+async fn test_list_enums_mood_enum_values() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let result = list_enums::handle(test_ctx(&url), None)
+        .await
+        .expect("list_enums must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let enums = v["enums"].as_array().unwrap();
+
+    let mood = enums
+        .iter()
+        .find(|e| e["name"] == "mood")
+        .expect("mood enum must be present");
+
+    assert_eq!(mood["schema"], "public", "mood must be in public schema");
+
+    let values = mood["values"]
+        .as_array()
+        .expect("mood.values must be array");
+    assert_eq!(values.len(), 3, "mood must have exactly 3 labels");
+    assert_eq!(values[0], "happy", "first label must be 'happy'");
+    assert_eq!(values[1], "neutral", "second label must be 'neutral'");
+    assert_eq!(values[2], "sad", "third label must be 'sad'");
+}
+
+/// Every enum entry has the required fields.
+#[tokio::test]
+async fn test_list_enums_entries_have_required_fields() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_describe_table_fixtures(&url).await;
+
+    let result = list_enums::handle(test_ctx(&url), None)
+        .await
+        .expect("list_enums must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let enums = v["enums"].as_array().unwrap();
+    assert!(!enums.is_empty(), "must have at least one enum");
+
+    for e in enums {
+        assert!(e["name"].is_string(), "enum.name must be string");
+        assert!(e["schema"].is_string(), "enum.schema must be string");
+        assert!(e["values"].is_array(), "enum.values must be array");
+        let vals = e["values"].as_array().unwrap();
+        assert!(!vals.is_empty(), "enum.values must not be empty");
+        for val in vals {
+            assert!(val.is_string(), "each enum value must be a string");
+        }
+    }
+}
+
+/// list_enums on a fresh DB without any user enums returns an empty array.
+#[tokio::test]
+async fn test_list_enums_empty_when_no_enums() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    // Do NOT call create_describe_table_fixtures — fresh container, no enums.
+    let result = list_enums::handle(test_ctx(&url), None)
+        .await
+        .expect("list_enums must succeed on a fresh database");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let enums = v["enums"].as_array().unwrap();
+    // A fresh postgres:16-alpine container has no user enums.
+    assert!(
+        enums.is_empty(),
+        "fresh database must have no user enums, got: {enums:?}"
     );
 }
