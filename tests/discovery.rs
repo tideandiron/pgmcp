@@ -16,7 +16,7 @@ use pgmcp::{
     config::{CacheConfig, Config, GuardrailConfig, PoolConfig, TelemetryConfig, TransportConfig},
     pg::pool::Pool,
     server::context::ToolContext,
-    tools::{list_databases, server_info},
+    tools::{list_databases, list_schemas, list_tables, server_info},
 };
 use serde_json::Value;
 
@@ -284,4 +284,316 @@ async fn test_list_databases_template0_size_is_null() {
         );
     }
     // Whether template0 appears depends on access — we assert no error occurred
+}
+
+// ── list_schemas ──────────────────────────────────────────────────────────────
+
+/// list_schemas returns an array under the "schemas" key.
+#[tokio::test]
+async fn test_list_schemas_returns_array() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_schemas::handle(test_ctx(&url), None)
+        .await
+        .expect("list_schemas must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert!(v["schemas"].is_array(), "result must have 'schemas' array");
+}
+
+/// list_schemas includes the public schema.
+#[tokio::test]
+async fn test_list_schemas_includes_public() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_schemas::handle(test_ctx(&url), None)
+        .await
+        .expect("list_schemas must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let schemas = v["schemas"].as_array().unwrap();
+    let found = schemas.iter().any(|s| s["name"] == "public");
+    assert!(found, "public schema must be present");
+}
+
+/// list_schemas excludes internal Postgres schemas.
+#[tokio::test]
+async fn test_list_schemas_excludes_internal_schemas() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_schemas::handle(test_ctx(&url), None)
+        .await
+        .expect("list_schemas must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let schemas = v["schemas"].as_array().unwrap();
+    let internal = ["pg_toast", "pg_catalog", "information_schema"];
+    for s in schemas {
+        let name = s["name"].as_str().unwrap();
+        assert!(
+            !internal.contains(&name),
+            "internal schema '{name}' must not be in list_schemas output"
+        );
+        // Also check prefixes for pg_temp_* / pg_toast_temp_*
+        assert!(
+            !name.starts_with("pg_temp_"),
+            "pg_temp_* schema '{name}' must not appear in list_schemas output"
+        );
+        assert!(
+            !name.starts_with("pg_toast"),
+            "pg_toast* schema '{name}' must not appear in list_schemas output"
+        );
+    }
+}
+
+/// Each schema entry has name and owner string fields.
+#[tokio::test]
+async fn test_list_schemas_entries_have_required_fields() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_schemas::handle(test_ctx(&url), None)
+        .await
+        .expect("list_schemas must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let schemas = v["schemas"].as_array().unwrap();
+    assert!(!schemas.is_empty(), "should return at least one schema");
+    for s in schemas {
+        assert!(s["name"].is_string(), "name must be a string");
+        assert!(s["owner"].is_string(), "owner must be a string");
+        // description is string | null
+        assert!(
+            s["description"].is_string() || s["description"].is_null(),
+            "description must be string or null"
+        );
+    }
+}
+
+// ── list_tables ───────────────────────────────────────────────────────────────
+
+/// Helper: create a table via a direct tokio-postgres connection.
+async fn create_test_table(url: &str, ddl: &str) {
+    use tokio_postgres::NoTls;
+    let (client, conn) = tokio_postgres::connect(url, NoTls)
+        .await
+        .expect("direct connect for DDL");
+    tokio::spawn(conn);
+    client.execute(ddl, &[]).await.expect("DDL must succeed");
+}
+
+/// list_tables with kind=table returns the test table in public schema.
+#[tokio::test]
+async fn test_list_tables_returns_tables() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_test_table(
+        &url,
+        "CREATE TABLE IF NOT EXISTS public.phase3_lt_test \
+         (id serial PRIMARY KEY, val text)",
+    )
+    .await;
+
+    let args = serde_json::from_str(r#"{"schema":"public","kind":"table"}"#).ok();
+    let result = list_tables::handle(test_ctx(&url), args)
+        .await
+        .expect("list_tables must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let tables = v["tables"].as_array().unwrap();
+    let found = tables.iter().any(|t| t["name"] == "phase3_lt_test");
+    assert!(
+        found,
+        "phase3_lt_test must appear in list_tables(public, table)"
+    );
+}
+
+/// list_tables entries have all required fields.
+#[tokio::test]
+async fn test_list_tables_entry_fields() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_test_table(
+        &url,
+        "CREATE TABLE IF NOT EXISTS public.phase3_lt_fields \
+         (id serial PRIMARY KEY)",
+    )
+    .await;
+    let args = serde_json::from_str(r#"{"schema":"public","kind":"table"}"#).ok();
+    let result = list_tables::handle(test_ctx(&url), args)
+        .await
+        .expect("list_tables must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let tables = v["tables"].as_array().unwrap();
+    assert!(!tables.is_empty(), "should have at least one table");
+    let t = tables.first().unwrap();
+    for field in &["schema", "name", "kind"] {
+        assert!(t[field].is_string(), "field {field} must be a string");
+    }
+    // row_estimate is i64 or null
+    assert!(
+        t["row_estimate"].is_number() || t["row_estimate"].is_null(),
+        "row_estimate must be number or null"
+    );
+    // description is string or null
+    assert!(
+        t["description"].is_string() || t["description"].is_null(),
+        "description must be string or null"
+    );
+}
+
+/// list_tables kind=view filter excludes regular tables.
+#[tokio::test]
+async fn test_list_tables_view_filter_excludes_tables() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_test_table(
+        &url,
+        "CREATE TABLE IF NOT EXISTS public.phase3_lt_notview \
+         (id serial PRIMARY KEY)",
+    )
+    .await;
+    let args = serde_json::from_str(r#"{"schema":"public","kind":"view"}"#).ok();
+    let result = list_tables::handle(test_ctx(&url), args)
+        .await
+        .expect("list_tables must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let tables = v["tables"].as_array().unwrap();
+    let any_table = tables.iter().any(|t| t["kind"] == "table");
+    assert!(!any_table, "kind=view filter must not return tables");
+}
+
+/// list_tables with no args returns param_invalid.
+#[tokio::test]
+async fn test_list_tables_missing_schema_is_param_invalid() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let result = list_tables::handle(test_ctx(&url), None).await;
+    assert!(result.is_err(), "missing schema should return an error");
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.code(),
+        "param_invalid",
+        "error code must be param_invalid"
+    );
+}
+
+/// list_tables with an unknown schema returns an empty tables array, not an error.
+#[tokio::test]
+async fn test_list_tables_unknown_schema_returns_empty() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let args = serde_json::from_str(r#"{"schema":"totally_nonexistent_schema_xyz"}"#).ok();
+    let result = list_tables::handle(test_ctx(&url), args)
+        .await
+        .expect("unknown schema should return empty, not error");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let tables = v["tables"].as_array().unwrap();
+    assert!(
+        tables.is_empty(),
+        "unknown schema must return empty tables array"
+    );
+}
+
+/// list_tables kind=all returns both tables and views.
+#[tokio::test]
+async fn test_list_tables_kind_all_returns_tables_and_views() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_test_table(
+        &url,
+        "CREATE TABLE IF NOT EXISTS public.phase3_lt_all_base \
+         (id serial PRIMARY KEY, val text)",
+    )
+    .await;
+    create_test_table(
+        &url,
+        "CREATE OR REPLACE VIEW public.phase3_lt_all_view \
+         AS SELECT id, val FROM public.phase3_lt_all_base",
+    )
+    .await;
+
+    let args = serde_json::from_str(r#"{"schema":"public","kind":"all"}"#).ok();
+    let result = list_tables::handle(test_ctx(&url), args)
+        .await
+        .expect("list_tables kind=all must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let tables = v["tables"].as_array().unwrap();
+    let has_table = tables.iter().any(|t| t["kind"] == "table");
+    let has_view = tables.iter().any(|t| t["kind"] == "view");
+    assert!(has_table, "kind=all must include tables");
+    assert!(has_view, "kind=all must include views");
+}
+
+/// list_tables kind=table returns correct schema and kind fields.
+#[tokio::test]
+async fn test_list_tables_schema_field_matches_requested() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    create_test_table(
+        &url,
+        "CREATE TABLE IF NOT EXISTS public.phase3_lt_schema_check \
+         (id serial PRIMARY KEY)",
+    )
+    .await;
+    let args = serde_json::from_str(r#"{"schema":"public","kind":"table"}"#).ok();
+    let result = list_tables::handle(test_ctx(&url), args)
+        .await
+        .expect("list_tables must succeed");
+    let text = result.content[0].as_text().unwrap().text.clone();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let tables = v["tables"].as_array().unwrap();
+    for t in tables {
+        assert_eq!(
+            t["schema"], "public",
+            "schema field must match the requested schema"
+        );
+        assert_eq!(
+            t["kind"], "table",
+            "kind field must be 'table' when kind=table requested"
+        );
+    }
+}
+
+/// list_tables with invalid kind parameter returns param_invalid.
+#[tokio::test]
+async fn test_list_tables_invalid_kind_is_param_invalid() {
+    let Some((_container, url)) = common::fixtures::pg_container().await else {
+        eprintln!("SKIP: Docker not available");
+        return;
+    };
+    let args = serde_json::from_str(r#"{"schema":"public","kind":"bogus_kind"}"#).ok();
+    let result = list_tables::handle(test_ctx(&url), args).await;
+    assert!(result.is_err(), "invalid kind must return an error");
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.code(),
+        "param_invalid",
+        "error code must be param_invalid for invalid kind"
+    );
 }
