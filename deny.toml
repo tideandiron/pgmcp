@@ -33,7 +33,6 @@ exceptions = []
 confidence-threshold = 0.8
 
 [bans]
-version = 2
 
 # Crates that are explicitly prohibited in pgmcp's own code.
 #
@@ -71,7 +70,6 @@ skip = [
 # in the tree (indicating two versions are in use), cargo-deny will flag it.
 
 [sources]
-version = 2
 # Only allow crates from crates.io. Git sources and path overrides must be
 # explicitly declared here during development; all must be removed before release.
 unknown-registry = "deny"
