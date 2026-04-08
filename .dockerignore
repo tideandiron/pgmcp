@@ -1,0 +1,35 @@
+# .dockerignore
+#
+# Exclude files from the Docker build context.
+# This reduces build time and prevents sensitive files from being sent to Docker.
+
+# Build artifacts
+target/
+
+# Git history and metadata
+.git/
+.github/
+
+# Test and benchmark output
+target/criterion/
+
+# Documentation
+docs/
+*.md
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# CI/CD config (not needed inside the image)
+.github/
+
+# Local config overrides (never include credentials in the image)
+pgmcp.toml
+*.toml.local
+
+# Rust incremental compilation cache
+.cargo/

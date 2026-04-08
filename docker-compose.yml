@@ -1,0 +1,99 @@
+# docker-compose.yml
+#
+# Local development environment for pgmcp + PostgreSQL.
+#
+# Usage:
+#   # Start all services:
+#   docker compose up -d
+#
+#   # View pgmcp logs:
+#   docker compose logs -f pgmcp
+#
+#   # Stop and remove containers (preserves postgres data volume):
+#   docker compose down
+#
+#   # Stop and remove containers + data volume (fresh start):
+#   docker compose down -v
+#
+# After startup:
+#   - pgmcp is running in stdio mode (default) — to use SSE mode, set
+#     PGMCP_TRANSPORT__MODE=sse and expose port 3000.
+#   - PostgreSQL is accessible at localhost:5432 (user: pgmcp, pass: pgmcp, db: pgmcp).
+#   - Connect your MCP client to pgmcp via stdin/stdout or SSE.
+
+services:
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pgmcp
+      POSTGRES_PASSWORD: pgmcp
+      POSTGRES_DB: pgmcp
+    ports:
+      # Expose Postgres to the host for direct psql / pgAdmin access.
+      - "5432:5432"
+    volumes:
+      - pgmcp_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgmcp -d pgmcp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── pgmcp ────────────────────────────────────────────────────────────────────
+  pgmcp:
+    image: pgmcp:latest
+    # Build locally if the image does not exist yet.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connection string — points to the postgres service defined above.
+      PGMCP_DATABASE_URL: "postgres://pgmcp:pgmcp@postgres:5432/pgmcp"
+
+      # Pool settings — small for local development.
+      PGMCP_POOL__MIN_SIZE: "1"
+      PGMCP_POOL__MAX_SIZE: "5"
+      PGMCP_POOL__ACQUIRE_TIMEOUT_SECONDS: "10"
+
+      # Transport mode.
+      # "stdio"  (default) — pgmcp reads JSON-RPC from stdin, writes to stdout.
+      #                       Use this when launching pgmcp as a subprocess.
+      # "sse"              — HTTP server with SSE for streaming.
+      #                       Uncomment the port mapping below and set:
+      #                       PGMCP_TRANSPORT__MODE=sse
+      PGMCP_TRANSPORT__MODE: "sse"
+      PGMCP_TRANSPORT__HOST: "0.0.0.0"
+      PGMCP_TRANSPORT__PORT: "3000"
+
+      # Telemetry.
+      PGMCP_TELEMETRY__LOG_FORMAT: "text"
+      PGMCP_TELEMETRY__LOG_LEVEL: "info"
+
+      # Guardrails — secure defaults.
+      PGMCP_GUARDRAILS__BLOCK_DDL: "true"
+      PGMCP_GUARDRAILS__BLOCK_COPY_PROGRAM: "true"
+      PGMCP_GUARDRAILS__BLOCK_SESSION_SET: "true"
+
+    ports:
+      # SSE transport port. Comment out if using stdio mode.
+      - "3000:3000"
+
+    healthcheck:
+      # pgmcp does not serve HTTP in stdio mode; the health check uses
+      # the health tool directly. In SSE mode, /health is the endpoint.
+      test: ["CMD", "/usr/local/bin/pgmcp", "--help"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  pgmcp_postgres_data:
+    driver: local
